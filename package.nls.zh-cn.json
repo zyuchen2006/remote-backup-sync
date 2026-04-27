@@ -1,0 +1,5 @@
+{
+  "remoteSync.configure": "配置代码同步到本地",
+  "remoteSync.start": "启动同步",
+  "remoteSync.stop": "停止同步"
+}

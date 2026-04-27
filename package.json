@@ -1,0 +1,179 @@
+{
+  "name": "remote-backup-sync",
+  "displayName": "Remote Backup Sync",
+  "description": "Real-time SSH backup of remote Linux code to local Windows - protect against remote server failures",
+  "version": "0.1.0",
+  "publisher": "zhangyc",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zyuchen2006/remote-backup-sync"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ssh",
+    "backup",
+    "sync",
+    "remote",
+    "linux",
+    "windows",
+    "sftp",
+    "remote-ssh",
+    "disaster recovery",
+    "code backup"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "remoteSyncContainer",
+          "title": "Remote Sync",
+          "icon": "$(sync)"
+        }
+      ]
+    },
+    "views": {
+      "remoteSyncContainer": [
+        {
+          "id": "remoteSyncTargets",
+          "name": "Sync Targets"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "remoteSync.configure",
+        "title": "%remoteSync.configure%"
+      },
+      {
+        "command": "remoteSync.start",
+        "title": "%remoteSync.start%"
+      },
+      {
+        "command": "remoteSync.stop",
+        "title": "%remoteSync.stop%"
+      },
+      {
+        "command": "remoteSync.debugInfo",
+        "title": "Remote Sync: Show Debug Info"
+      },
+      {
+        "command": "remoteSync.startTarget",
+        "title": "Start Sync",
+        "icon": "$(play)"
+      },
+      {
+        "command": "remoteSync.stopTarget",
+        "title": "Stop Sync",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "remoteSync.removeTarget",
+        "title": "Remove Target",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "remoteSync.startTarget",
+          "when": "view == remoteSyncTargets && viewItem == syncTarget",
+          "group": "inline@1"
+        },
+        {
+          "command": "remoteSync.stopTarget",
+          "when": "view == remoteSyncTargets && viewItem == syncTarget",
+          "group": "inline@2"
+        },
+        {
+          "command": "remoteSync.removeTarget",
+          "when": "view == remoteSyncTargets && viewItem == syncTarget",
+          "group": "inline@3"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "remoteSync.configure",
+          "when": "explorerResourceIsFolder && (remoteName == 'ssh-remote' || remoteName == 'wsl')",
+          "group": "remoteSync@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Remote Code Sync",
+      "properties": {
+        "remoteSync.syncInterval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 10,
+          "description": "同步间隔（秒）"
+        },
+        "remoteSync.backupCount": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "保留的备份文件数量"
+        },
+        "remoteSync.excludePatterns": {
+          "type": "array",
+          "default": [
+            "node_modules/**",
+            ".git/**",
+            ".vscode/**",
+            "*.log",
+            "*.tmp"
+          ],
+          "description": "排除的文件模式"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "lint": "eslint src --ext ts",
+    "test": "mocha --require ts-node/register src/test/**/*.test.ts --timeout 30000",
+    "test:unit": "mocha --require ts-node/register src/test/FileSyncEngine.test.ts src/test/LocalBackupManager.test.ts --timeout 30000",
+    "test:integration": "mocha --require ts-node/register src/test/integration.test.ts --timeout 60000",
+    "test:e2e": "mocha --require ts-node/register src/test/e2e.test.ts --timeout 120000",
+    "test:perf": "mocha --require ts-node/register src/test/performance.test.ts --timeout 300000"
+  },
+  "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^18.0.0",
+    "@types/ssh2": "^1.15.5",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "chai": "^6.2.2",
+    "eslint": "^8.0.0",
+    "mocha": "^11.7.5",
+    "sharp": "^0.34.5",
+    "ts-loader": "^9.5.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0",
+    "webpack": "^5.106.2",
+    "webpack-cli": "^7.0.2"
+  },
+  "dependencies": {
+    "minimatch": "^9.0.0",
+    "ssh2": "^1.15.0"
+  }
+}

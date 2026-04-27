@@ -1,0 +1,5 @@
+{
+  "remoteSync.configure": "Configure Code Sync to Local",
+  "remoteSync.start": "Start Sync",
+  "remoteSync.stop": "Stop Sync"
+}
