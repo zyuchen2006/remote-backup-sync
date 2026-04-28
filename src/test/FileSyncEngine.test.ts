@@ -56,18 +56,29 @@ describe('FileSyncEngine Unit Tests', () => {
 
   describe('File Exclusion', () => {
     it('should exclude files matching patterns', () => {
-      const engine = syncEngine as any;
-      assert.strictEqual(engine.isExcluded('node_modules/package.json'), true);
-      assert.strictEqual(engine.isExcluded('.git/config'), true);
-      assert.strictEqual(engine.isExcluded('src/index.ts'), false);
+      // Test exclusion through the accessor
+      const accessor = new SSHFileAccessor(
+        TEST_CONFIG.remote.testDir,
+        ['node_modules/**', '.git/**'],
+        sshManager
+      );
+      const accessorAny = accessor as any;
+      assert.strictEqual(accessorAny.isExcluded('node_modules/package.json'), true);
+      assert.strictEqual(accessorAny.isExcluded('.git/config'), true);
+      assert.strictEqual(accessorAny.isExcluded('src/index.ts'), false);
     });
 
     it('should handle nested paths', () => {
-      const engine = syncEngine as any;
-      // node_modules/** only matches if node_modules is at root
-      // For nested paths, the pattern would need to be **/node_modules/**
-      assert.strictEqual(engine.isExcluded('node_modules/nested/lib.js'), true);
-      assert.strictEqual(engine.isExcluded('src/lib.js'), false);
+      // Test exclusion through the accessor
+      const accessor = new SSHFileAccessor(
+        TEST_CONFIG.remote.testDir,
+        ['node_modules/**', '.git/**'],
+        sshManager
+      );
+      const accessorAny = accessor as any;
+      // node_modules/** matches node_modules at any level
+      assert.strictEqual(accessorAny.isExcluded('node_modules/nested/lib.js'), true);
+      assert.strictEqual(accessorAny.isExcluded('src/lib.js'), false);
     });
   });
 
