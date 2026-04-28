@@ -25,8 +25,11 @@ export class WSLFileAccessor implements IFileAccessor {
    * Convert Linux path to Windows UNC path
    */
   private toWindowsPath(linuxPath: string): string {
+    // Normalize path separators to forward slashes first
     const normalizedPath = linuxPath.replace(/\\/g, '/');
-    return `\\\\wsl$\\${this.distroName}${normalizedPath}`;
+    // Convert forward slashes to backslashes for Windows UNC path
+    const windowsPath = normalizedPath.replace(/\//g, '\\');
+    return `\\\\wsl$\\${this.distroName}${windowsPath}`;
   }
 
   /**

@@ -20,7 +20,7 @@ describe('RemoteEnvironmentDetector Tests', () => {
 
     it('should normalize backslashes to forward slashes', () => {
       const result = RemoteEnvironmentDetector.toWindowsPath('Ubuntu', '/home\\user\\project');
-      assert.strictEqual(result, '\\\\wsl$\\Ubuntu\\home/user/project');
+      assert.strictEqual(result, '\\\\wsl$\\Ubuntu\\home\\user\\project');
     });
   });
 

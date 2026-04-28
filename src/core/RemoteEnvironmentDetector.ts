@@ -116,10 +116,12 @@ export class RemoteEnvironmentDetector {
    * Example: /home/user/project -> \\wsl$\Ubuntu\home\user\project
    */
   public static toWindowsPath(distroName: string, linuxPath: string): string {
-    // Normalize path separators
+    // Normalize path separators to forward slashes first
     const normalizedPath = linuxPath.replace(/\\/g, '/');
+    // Convert forward slashes to backslashes for Windows UNC path
+    const windowsPath = normalizedPath.replace(/\//g, '\\');
     // Build UNC path
-    return `\\\\wsl$\\${distroName}${normalizedPath}`;
+    return `\\\\wsl$\\${distroName}${windowsPath}`;
   }
 
   /**
