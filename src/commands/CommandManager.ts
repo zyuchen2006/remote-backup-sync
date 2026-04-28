@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { RemoteSSHDetector } from '../core/RemoteSSHDetector';
+import { RemoteEnvironmentDetector, RemoteEnvironmentInfo } from '../core/RemoteEnvironmentDetector';
 import { SSHConnectionManager } from '../core/SSHConnectionManager';
 import { DatabaseManager } from '../core/DatabaseManager';
 import { FileSyncEngine } from '../core/FileSyncEngine';
@@ -14,6 +14,9 @@ import { SyncTreeDataProvider } from '../ui/SyncTreeDataProvider';
 import { SyncTarget } from '../types';
 import { t } from '../utils/i18n';
 import { SSHConfigReader } from '../utils/SSHConfigReader';
+import { FileAccessorFactory } from '../core/FileAccessorFactory';
+import { IFileAccessor } from '../core/IFileAccessor';
+import { WSLFileAccessor } from '../core/WSLFileAccessor';
 
 export class CommandManager {
   private context: vscode.ExtensionContext;
@@ -76,15 +79,18 @@ export class CommandManager {
     const remoteName = vscode.env.remoteName;
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     const uri = workspaceFolder?.uri;
+    const envType = RemoteEnvironmentDetector.detectEnvironment();
 
     const info = `
 Debug Information:
   Remote Name: ${remoteName || 'undefined'}
+  Environment Type: ${envType || 'local'}
   Workspace URI: ${uri?.toString() || 'undefined'}
   URI Scheme: ${uri?.scheme || 'undefined'}
   URI Authority: ${uri?.authority || 'undefined'}
   URI Path: ${uri?.path || 'undefined'}
-  Is Remote-SSH: ${RemoteSSHDetector.isRemoteSSH()}
+  Is Remote-SSH: ${RemoteEnvironmentDetector.isRemoteSSH()}
+  Is WSL: ${RemoteEnvironmentDetector.isWSL()}
     `.trim();
 
     vscode.window.showInformationMessage(info, { modal: true });
@@ -96,22 +102,31 @@ Debug Information:
    */
   private async configure(uri: vscode.Uri): Promise<void> {
     try {
-      if (!RemoteSSHDetector.isRemoteSSH()) {
-        RemoteSSHDetector.showNotRemoteSSHError();
+      const envType = RemoteEnvironmentDetector.detectEnvironment();
+      if (!envType) {
+        RemoteEnvironmentDetector.showNotRemoteError();
         return;
       }
 
       // Get remote path from clicked folder or current workspace
       const remotePath = (uri && uri.scheme === 'vscode-remote')
-        ? RemoteSSHDetector.getRemotePathFromUri(uri)
-        : RemoteSSHDetector.getRemotePath();
+        ? RemoteEnvironmentDetector.getRemotePathFromUri(uri)
+        : RemoteEnvironmentDetector.getRemotePath();
       if (!remotePath) {
         vscode.window.showErrorMessage(t('error.noWorkspace'));
         return;
       }
 
+      // Handle WSL configuration
+      if (envType === 'wsl') {
+        await this.configureWSL(remotePath);
+        return;
+      }
+
+      // Handle SSH configuration (existing logic)
+
       // Auto-detect host/port from SSH_CONNECTION env var, fallback to manual input
-      const autoConn = RemoteSSHDetector.getSSHConnectionInfo();
+      const autoConn = RemoteEnvironmentDetector.getSSHConnectionInfo();
 
       const sshHost = await vscode.window.showInputBox({
         prompt: t('dialog.sshHost'),
@@ -201,6 +216,75 @@ ${t('config.backupCount')}: ${config.backupCount}
     }
   }
 
+  /**
+   * Configure WSL sync
+   */
+  private async configureWSL(remotePath: string): Promise<void> {
+    const wslInfo = RemoteEnvironmentDetector.getWSLInfo();
+    if (!wslInfo) {
+      vscode.window.showErrorMessage('Failed to get WSL information');
+      return;
+    }
+
+    // Ask for local path
+    const localPath = await vscode.window.showInputBox({
+      prompt: 'Select local Windows directory for backup',
+      placeHolder: 'D:\\projects\\myapp',
+      value: `D:\\projects\\${path.basename(remotePath)}`
+    });
+    if (!localPath) {
+      return;
+    }
+
+    const validation = ConfigManager.validateLocalPath(localPath);
+    if (!validation.valid) {
+      vscode.window.showErrorMessage(t('error.invalidLocalPath', validation.error || ''));
+      return;
+    }
+
+    const excludeInput = await vscode.window.showInputBox({
+      prompt: t('dialog.excludePatterns'),
+      placeHolder: 'node_modules/**,.git/**',
+      value: ConfigManager.getExcludePatterns().join(',')
+    });
+    const excludePatterns = excludeInput ? excludeInput.split(',').map(s => s.trim()).filter(Boolean) : ConfigManager.getExcludePatterns();
+
+    const projectId = `wsl_${wslInfo.distroName}_${remotePath.replace(/\//g, '_')}`;
+    const config = ConfigManager.loadConfig() as any || ConfigManager.createDefaultConfig(projectId, remotePath, localPath) as any;
+
+    // Store WSL-specific info
+    config.environmentType = 'wsl';
+    config.distroName = wslInfo.distroName;
+
+    if (!config.syncTargets) { config.syncTargets = []; }
+    const existingIdx = config.syncTargets.findIndex((t: SyncTarget) => t.projectId === projectId);
+    const newTarget: SyncTarget = { projectId, remotePath, localPath, enabled: true, excludePatterns };
+    if (existingIdx >= 0) {
+      config.syncTargets[existingIdx] = newTarget;
+    } else {
+      config.syncTargets.push(newTarget);
+    }
+
+    ConfigManager.saveConfig(config);
+    this.treeProvider.addTarget(newTarget);
+
+    const summary = `
+Environment: WSL (${wslInfo.distroName})
+${t('config.remotePath')}: ${remotePath}
+${t('config.localPath')}: ${localPath}
+${t('config.syncInterval')}: ${config.syncInterval}s
+${t('config.backupCount')}: ${config.backupCount}
+    `.trim();
+
+    const result = await vscode.window.showInformationMessage(
+      summary, { modal: true }, t('command.start'), t('dialog.cancel')
+    );
+
+    if (result === t('command.start')) {
+      await this.start();
+    }
+  }
+
   private async start(): Promise<void> {
     try {
       const config = ConfigManager.loadConfig() as any;
@@ -209,28 +293,33 @@ ${t('config.backupCount')}: ${config.backupCount}
         return;
       }
 
-      const host: string = config.host;
-      const port: number = config.port || 22;
-      const username: string = config.username || 'root';
-      const privateKey = config.identityFile ?
-        fs.readFileSync(config.identityFile) : undefined;
+      const envType = config.environmentType || 'ssh';
 
-      let password: string | undefined;
-      if (!privateKey) {
-        const secretKey = `remoteSync.password.${host}:${username}`;
-        password = await this.context.secrets.get(secretKey);
-        if (!password) {
-          password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
-          if (!password) { return; }
-          await this.context.secrets.store(secretKey, password);
+      // Setup SSH connection if needed
+      if (envType === 'ssh') {
+        const host: string = config.host;
+        const port: number = config.port || 22;
+        const username: string = config.username || 'root';
+        const privateKey = config.identityFile ?
+          fs.readFileSync(config.identityFile) : undefined;
+
+        let password: string | undefined;
+        if (!privateKey) {
+          const secretKey = `remoteSync.password.${host}:${username}`;
+          password = await this.context.secrets.get(secretKey);
+          if (!password) {
+            password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
+            if (!password) { return; }
+            await this.context.secrets.store(secretKey, password);
+          }
         }
-      }
 
-      if (!this.sshManager || !this.sshManager.isConnected()) {
-        this.sshManager = new SSHConnectionManager({ host, port, username, privateKey, password });
-        this.outputManager.info(t('info.connecting', username, host, port));
-        await this.sshManager.connect();
-        this.outputManager.info(t('info.connected'));
+        if (!this.sshManager || !this.sshManager.isConnected()) {
+          this.sshManager = new SSHConnectionManager({ host, port, username, privateKey, password });
+          this.outputManager.info(t('info.connecting', username, host, port));
+          await this.sshManager.connect();
+          this.outputManager.info(t('info.connected'));
+        }
       }
 
       const targets: SyncTarget[] = config.syncTargets?.length
@@ -245,9 +334,34 @@ ${t('config.backupCount')}: ${config.backupCount}
         const dbPath = ConfigManager.getDatabasePath(target.projectId);
         const dbManager = new DatabaseManager(dbPath);
 
+        // Create appropriate file accessor
+        let accessor: IFileAccessor;
+        if (envType === 'wsl') {
+          const distroName = config.distroName;
+          if (!distroName) {
+            throw new Error('WSL distribution name not found in config');
+          }
+          accessor = new WSLFileAccessor(
+            distroName,
+            target.remotePath,
+            target.excludePatterns || config.excludePatterns
+          );
+          // Clean up temp files on startup
+          (accessor as WSLFileAccessor).cleanupTempFiles(target.localPath);
+        } else {
+          if (!this.sshManager) {
+            throw new Error('SSH connection manager not initialized');
+          }
+          const { SSHFileAccessor } = require('../core/SSHFileAccessor');
+          accessor = new SSHFileAccessor(
+            target.remotePath,
+            target.excludePatterns || config.excludePatterns,
+            this.sshManager
+          );
+        }
+
         const syncEngine = new FileSyncEngine(
-          target.projectId, target.remotePath, target.localPath,
-          target.excludePatterns || config.excludePatterns, this.sshManager, dbManager
+          target.projectId, target.remotePath, target.localPath, accessor, dbManager
         );
         const backupManager = new LocalBackupManager(
           target.projectId, target.localPath, { maxBackups: config.backupCount }, dbManager
@@ -398,36 +512,64 @@ ${t('config.backupCount')}: ${config.backupCount}
     const target = config.syncTargets?.find((t: SyncTarget) => t.projectId === projectId);
     if (!target) { return; }
 
-    // Ensure SSH connection
-    if (!this.sshManager || !this.sshManager.isConnected()) {
-      const host: string = config.host;
-      const port: number = config.port || 22;
-      const username: string = config.username || 'root';
-      const privateKey = config.identityFile ? fs.readFileSync(config.identityFile) : undefined;
+    const envType = config.environmentType || 'ssh';
 
-      let password: string | undefined;
-      if (!privateKey) {
-        const secretKey = `remoteSync.password.${host}:${username}`;
-        password = await this.context.secrets.get(secretKey);
-        if (!password) {
-          password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
-          if (!password) { return; }
-          await this.context.secrets.store(secretKey, password);
+    // Ensure SSH connection if needed
+    if (envType === 'ssh') {
+      if (!this.sshManager || !this.sshManager.isConnected()) {
+        const host: string = config.host;
+        const port: number = config.port || 22;
+        const username: string = config.username || 'root';
+        const privateKey = config.identityFile ? fs.readFileSync(config.identityFile) : undefined;
+
+        let password: string | undefined;
+        if (!privateKey) {
+          const secretKey = `remoteSync.password.${host}:${username}`;
+          password = await this.context.secrets.get(secretKey);
+          if (!password) {
+            password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
+            if (!password) { return; }
+            await this.context.secrets.store(secretKey, password);
+          }
         }
-      }
 
-      this.sshManager = new SSHConnectionManager({ host, port, username, privateKey, password });
-      this.outputManager.info(t('info.connecting', username, host, port));
-      await this.sshManager.connect();
-      this.outputManager.info(t('info.connected'));
+        this.sshManager = new SSHConnectionManager({ host, port, username, privateKey, password });
+        this.outputManager.info(t('info.connecting', username, host, port));
+        await this.sshManager.connect();
+        this.outputManager.info(t('info.connected'));
+      }
     }
 
     const dbPath = ConfigManager.getDatabasePath(target.projectId);
     const dbManager = new DatabaseManager(dbPath);
 
+    // Create appropriate file accessor
+    let accessor: IFileAccessor;
+    if (envType === 'wsl') {
+      const distroName = config.distroName;
+      if (!distroName) {
+        throw new Error('WSL distribution name not found in config');
+      }
+      accessor = new WSLFileAccessor(
+        distroName,
+        target.remotePath,
+        target.excludePatterns || config.excludePatterns
+      );
+      (accessor as WSLFileAccessor).cleanupTempFiles(target.localPath);
+    } else {
+      if (!this.sshManager) {
+        throw new Error('SSH connection manager not initialized');
+      }
+      const { SSHFileAccessor } = require('../core/SSHFileAccessor');
+      accessor = new SSHFileAccessor(
+        target.remotePath,
+        target.excludePatterns || config.excludePatterns,
+        this.sshManager
+      );
+    }
+
     const syncEngine = new FileSyncEngine(
-      target.projectId, target.remotePath, target.localPath,
-      target.excludePatterns || config.excludePatterns, this.sshManager, dbManager
+      target.projectId, target.remotePath, target.localPath, accessor, dbManager
     );
     const backupManager = new LocalBackupManager(
       target.projectId, target.localPath, { maxBackups: config.backupCount }, dbManager

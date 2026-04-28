@@ -7,6 +7,7 @@ import { SyncScheduler } from '../core/SyncScheduler';
 import { FileSyncEngine } from '../core/FileSyncEngine';
 import { LocalBackupManager } from '../core/LocalBackupManager';
 import { SSHConnectionManager } from '../core/SSHConnectionManager';
+import { IFileAccessor, FileInfo, FileStats } from '../core/IFileAccessor';
 import { TEST_CONFIG } from './setup';
 
 /**
@@ -40,36 +41,30 @@ describe('Critical Scenarios Tests', function() {
 
       const dbManager = new DatabaseManager(dbPath);
 
-      // Create a mock SSH manager that will fail for specific files
-      const mockSSH = {
-        isConnected: () => true,
-        getSFTP: () => ({
-          readdir: (remotePath: string, callback: any) => {
-            callback(null, [
-              { filename: 'success.txt', attrs: { mtime: Date.now() / 1000, size: 100 } },
-              { filename: 'fail.txt', attrs: { mtime: Date.now() / 1000, size: 100 } }
-            ]);
-          },
-          stat: (filePath: string, callback: any) => {
-            callback(null, { mtime: Date.now() / 1000, size: 100 });
-          },
-          fastGet: (remotePath: string, localPath: string, callback: any) => {
-            if (remotePath.includes('fail.txt')) {
-              callback(new Error('Simulated network error'));
-            } else {
-              fs.writeFileSync(localPath, 'test content');
-              callback(null);
-            }
+      // Create a mock file accessor that will fail for specific files
+      const mockAccessor: IFileAccessor = {
+        scanDirectory: async (path: string) => {
+          const files = new Map<string, FileInfo>();
+          files.set('success.txt', { mtime: Date.now(), size: 100 });
+          files.set('fail.txt', { mtime: Date.now(), size: 100 });
+          return files;
+        },
+        downloadFile: async (remotePath: string, localPath: string) => {
+          if (remotePath.includes('fail.txt')) {
+            throw new Error('Simulated network error');
           }
-        })
-      } as any;
+          fs.writeFileSync(localPath, 'test content');
+        },
+        getFileStats: async (path: string) => {
+          return { mtime: Date.now(), size: 100, isFile: true, isDirectory: false };
+        }
+      };
 
       const syncEngine = new FileSyncEngine(
         'test-project',
         '/remote/path',
         localPath,
-        [],
-        mockSSH,
+        mockAccessor,
         dbManager
       );
 

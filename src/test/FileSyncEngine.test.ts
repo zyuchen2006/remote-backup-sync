@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { FileSyncEngine } from '../core/FileSyncEngine';
 import { SSHConnectionManager } from '../core/SSHConnectionManager';
+import { SSHFileAccessor } from '../core/SSHFileAccessor';
 import { DatabaseManager } from '../core/DatabaseManager';
 import { TEST_CONFIG } from './setup';
 
@@ -29,13 +30,19 @@ describe('FileSyncEngine Unit Tests', () => {
     }
     dbManager = new DatabaseManager(testDbPath);
 
+    // Create SSH file accessor
+    const accessor = new SSHFileAccessor(
+      TEST_CONFIG.remote.testDir,
+      ['node_modules/**', '.git/**'],
+      sshManager
+    );
+
     // Create sync engine
     syncEngine = new FileSyncEngine(
       'test-project',
       TEST_CONFIG.remote.testDir,
       TEST_CONFIG.local.testDir,
-      ['node_modules/**', '.git/**'],
-      sshManager,
+      accessor,
       dbManager
     );
   });

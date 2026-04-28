@@ -5,6 +5,18 @@ export interface RemoteInfo {
   remotePath: string;
 }
 
+export interface FileInfo {
+  mtime: number;  // Modification time in milliseconds
+  size: number;   // File size in bytes
+}
+
+export interface FileStats {
+  mtime: number;
+  size: number;
+  isFile: boolean;
+  isDirectory: boolean;
+}
+
 export interface SyncTarget {
   projectId: string;
   remotePath: string;

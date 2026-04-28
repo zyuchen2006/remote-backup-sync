@@ -1,5 +1,6 @@
 {
   "error.notRemoteSSH": "This feature is only available in Remote-SSH environment. Please connect to a remote server using Remote-SSH first.",
+  "error.notRemoteEnvironment": "This feature is only available in Remote-SSH or Remote-WSL environment. Please connect to a remote server or WSL first.",
   "error.noWorkspace": "No workspace folder found. Please open a folder first.",
   "error.connectionFailed": "Failed to connect to remote server: {0}",
   "error.syncFailed": "Sync failed: {0}",
@@ -8,6 +9,10 @@
   "error.remoteAccessFailed": "Cannot access remote path: {0}",
   "error.backupFailed": "Failed to create backup: {0}",
   "error.restoreFailed": "Failed to restore backup: {0}",
+  "error.wslDistroNotRunning": "WSL distribution '{0}' is not running. Start it with: wsl -d {0}",
+  "error.pathTooLong": "Path too long for Windows ({0} chars): {1}",
+  "error.invalidWindowsChars": "Path contains Windows-incompatible characters: {0}",
+  "error.caseConflict": "Case-sensitive filename conflict detected",
 
   "info.syncStarted": "Sync started",
   "info.syncStopped": "Sync stopped",

@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SSHConnectionManager } from '../core/SSHConnectionManager';
+import { SSHFileAccessor } from '../core/SSHFileAccessor';
 import { FileSyncEngine } from '../core/FileSyncEngine';
 import { DatabaseManager } from '../core/DatabaseManager';
 import { TEST_CONFIG } from './setup';
@@ -42,12 +43,12 @@ describe('Integration Tests', () => {
 
     // Setup database and sync engine
     dbManager = new DatabaseManager(testDbPath);
+    const accessor = new SSHFileAccessor(remoteTestDir, [], sshManager);
     syncEngine = new FileSyncEngine(
       'integration-test',
       remoteTestDir,
       localTestDir,
-      [],
-      sshManager,
+      accessor,
       dbManager
     );
   });

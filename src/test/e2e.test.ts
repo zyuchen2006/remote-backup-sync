@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SSHConnectionManager } from '../core/SSHConnectionManager';
+import { SSHFileAccessor } from '../core/SSHFileAccessor';
 import { FileSyncEngine } from '../core/FileSyncEngine';
 import { LocalBackupManager } from '../core/LocalBackupManager';
 import { DatabaseManager } from '../core/DatabaseManager';
@@ -42,7 +43,8 @@ describe('End-to-End Tests', () => {
     });
 
     dbManager = new DatabaseManager(testDbPath);
-    syncEngine = new FileSyncEngine('e2e-test', remoteTestDir, localTestDir, [], sshManager, dbManager);
+    const accessor = new SSHFileAccessor(remoteTestDir, [], sshManager);
+    syncEngine = new FileSyncEngine('e2e-test', remoteTestDir, localTestDir, accessor, dbManager);
     backupManager = new LocalBackupManager('e2e-test', localTestDir, { maxBackups: 3 }, dbManager);
   });
 

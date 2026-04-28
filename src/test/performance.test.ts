@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SSHConnectionManager } from '../core/SSHConnectionManager';
+import { SSHFileAccessor } from '../core/SSHFileAccessor';
 import { FileSyncEngine } from '../core/FileSyncEngine';
 import { DatabaseManager } from '../core/DatabaseManager';
 import { TEST_CONFIG, generateTestFiles } from './setup';
@@ -38,7 +39,8 @@ describe('Performance Tests', () => {
     });
 
     dbManager = new DatabaseManager(testDbPath);
-    syncEngine = new FileSyncEngine('perf-test', remoteTestDir, localTestDir, [], sshManager, dbManager);
+    const accessor = new SSHFileAccessor(remoteTestDir, [], sshManager);
+    syncEngine = new FileSyncEngine('perf-test', remoteTestDir, localTestDir, accessor, dbManager);
 
     console.log(`\n[Performance Test] Creating ${TEST_CONFIG.performance.fileCount} test files on remote...`);
     await createRemoteTestFiles(sftp, remoteTestDir, TEST_CONFIG.performance.fileCount);

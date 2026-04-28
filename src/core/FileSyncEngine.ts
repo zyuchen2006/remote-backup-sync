@@ -1,8 +1,6 @@
-import { SFTPWrapper } from 'ssh2';
 import * as fs from 'fs';
 import * as path from 'path';
-import { minimatch } from 'minimatch';
-import { SSHConnectionManager } from './SSHConnectionManager';
+import { IFileAccessor } from './IFileAccessor';
 import { DatabaseManager } from './DatabaseManager';
 import { FileSnapshot } from '../types';
 
@@ -17,96 +15,28 @@ export class FileSyncEngine {
   private projectId: string;
   private remotePath: string;
   private localPath: string;
-  private excludePatterns: string[];
-  private sshManager: SSHConnectionManager;
+  private accessor: IFileAccessor;
   private dbManager: DatabaseManager;
 
   constructor(
     projectId: string,
     remotePath: string,
     localPath: string,
-    excludePatterns: string[],
-    sshManager: SSHConnectionManager,
+    accessor: IFileAccessor,
     dbManager: DatabaseManager
   ) {
     this.projectId = projectId;
     this.remotePath = remotePath;
     this.localPath = localPath;
-    this.excludePatterns = excludePatterns;
-    this.sshManager = sshManager;
+    this.accessor = accessor;
     this.dbManager = dbManager;
   }
 
   /**
-   * Scan remote directory
+   * Scan remote directory using file accessor
    */
   public async scanRemoteDirectory(): Promise<Map<string, { mtime: number; size: number }>> {
-    const sftp = this.sshManager.getSFTP();
-    const files = new Map<string, { mtime: number; size: number }>();
-
-    await this.scanRemoteRecursive(sftp, this.remotePath, '', files);
-
-    return files;
-  }
-
-  /**
-   * Recursively scan remote directory
-   */
-  private async scanRemoteRecursive(
-    sftp: SFTPWrapper,
-    basePath: string,
-    relativePath: string,
-    files: Map<string, { mtime: number; size: number }>
-  ): Promise<void> {
-    const fullPath = path.posix.join(basePath, relativePath);
-
-    return new Promise((resolve, reject) => {
-      sftp.readdir(fullPath, async (err, list) => {
-        if (err) {
-          return reject(err);
-        }
-
-        for (const item of list) {
-          const itemRelativePath = path.posix.join(relativePath, item.filename);
-
-          // Check if excluded
-          if (this.isExcluded(itemRelativePath)) {
-            continue;
-          }
-
-          if (item.attrs.isDirectory()) {
-            // Recursively scan subdirectory
-            try {
-              await this.scanRemoteRecursive(sftp, basePath, itemRelativePath, files);
-            } catch (error) {
-              console.error(`Failed to scan directory ${itemRelativePath}:`, error);
-            }
-          } else if (item.attrs.isFile()) {
-            files.set(itemRelativePath, {
-              mtime: item.attrs.mtime * 1000, // Convert to milliseconds
-              size: item.attrs.size
-            });
-          }
-        }
-
-        resolve();
-      });
-    });
-  }
-
-  /**
-   * Check if file should be excluded
-   */
-  private isExcluded(filePath: string): boolean {
-    const normalizedPath = filePath.replace(/\\/g, '/');
-
-    for (const pattern of this.excludePatterns) {
-      if (minimatch(normalizedPath, pattern)) {
-        return true;
-      }
-    }
-
-    return false;
+    return await this.accessor.scanDirectory(this.remotePath);
   }
 
   /**
@@ -162,49 +92,11 @@ export class FileSyncEngine {
   }
 
   /**
-   * Download file from remote
+   * Download file from remote using file accessor
    */
   public async downloadFile(remotePath: string): Promise<void> {
-    const sftp = this.sshManager.getSFTP();
-    const remoteFullPath = path.posix.join(this.remotePath, remotePath);
     const localFullPath = path.join(this.localPath, remotePath);
-    const localTempPath = `${localFullPath}.tmp`;
-
-    // Ensure local directory exists
-    const localDir = path.dirname(localFullPath);
-    if (!fs.existsSync(localDir)) {
-      fs.mkdirSync(localDir, { recursive: true });
-    }
-
-    return new Promise((resolve, reject) => {
-      sftp.fastGet(remoteFullPath, localTempPath, (err) => {
-        if (err) {
-          // Clean up temp file on error
-          if (fs.existsSync(localTempPath)) {
-            fs.unlinkSync(localTempPath);
-          }
-          return reject(err);
-        }
-
-        // Verify file size
-        const stats = fs.statSync(localTempPath);
-        sftp.stat(remoteFullPath, (statErr, remoteStats) => {
-          if (statErr) {
-            fs.unlinkSync(localTempPath);
-            return reject(statErr);
-          }
-
-          if (stats.size !== remoteStats.size) {
-            fs.unlinkSync(localTempPath);
-            return reject(new Error('File size mismatch after download'));
-          }
-
-          // Rename temp file to final name
-          fs.renameSync(localTempPath, localFullPath);
-          resolve();
-        });
-      });
-    });
+    await this.accessor.downloadFile(remotePath, localFullPath);
   }
 
   /**
