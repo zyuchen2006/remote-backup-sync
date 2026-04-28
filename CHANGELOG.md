@@ -69,6 +69,33 @@ All notable changes to the "Remote Backup Sync" extension will be documented in 
 
 ## [Unreleased]
 
+### Added
+
+- **WSL Support**: Full support for Windows Subsystem for Linux (WSL) environments
+  - Automatic WSL environment detection
+  - Direct file system access via Windows UNC paths (`\\wsl$\distro\path`)
+  - No SSH credentials required for WSL connections
+  - Support for multiple WSL distributions
+  - Path conversion between Linux and Windows formats
+- `clearSnapshots()` method in DatabaseManager for test cleanup
+
+### Fixed
+
+- Fixed Windows UNC path format in WSL file accessor (backslashes instead of forward slashes)
+- Fixed exclusion pattern tests to properly test accessor methods
+- Fixed Windows compatibility issues in tests (chmod, mtime precision)
+- Fixed async timing issues in critical scenarios tests
+- Fixed E2E test file residue issue by clearing database snapshots before tests
+- Fixed path parameter handling in local modification detection tests
+
+### Technical Improvements
+
+- Added comprehensive test suite for WSL functionality (39 tests)
+- Added vscode API mock for testing environment-dependent code
+- Improved test isolation and cleanup strategies
+- Added ts-node configuration for CommonJS module resolution
+- Enhanced error messages in E2E tests for better debugging
+
 ### Planned Features
 
 - Backup file tree view with restore functionality

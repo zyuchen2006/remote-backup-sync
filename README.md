@@ -41,9 +41,10 @@ Continuously backup remote Linux code to local Windows via SSH. Protect your wor
 
 - **Automatic Sync**: Continuously sync remote directories to local Windows
 - **Multi-Directory Support**: Sync multiple remote directories simultaneously
+- **Remote Environment Support**: Works with both Remote-SSH and WSL (Windows Subsystem for Linux)
 - **Smart Backup**: Automatically backup locally modified files before overwriting
 - **Keep-Only Strategy**: Remote deletions don't delete local files (防止误删传播)
-- **Password Security**: Passwords stored in system keychain (Windows Credential Manager)
+- **Password Security**: Passwords stored in system keychain (Windows Credential Manager) for SSH connections
 - **Custom Exclude Rules**: Configure different exclude patterns for each directory
 - **Visual Management**: Sidebar view to manage all sync targets
 - **Auto-Start**: Automatically resume sync when VSCode starts
@@ -60,17 +61,19 @@ Continuously backup remote Linux code to local Windows via SSH. Protect your wor
 
 ### Configure Sync Target
 
-1. Connect to remote server via Remote-SSH
+1. Connect to remote server via Remote-SSH or open a WSL workspace
 2. Right-click on a folder in Explorer
 3. Select "Configure Code Sync to Local"
 4. Enter:
-   - SSH host (auto-detected if available)
-   - Username
-   - Password (stored securely)
+   - SSH host (auto-detected if available, not needed for WSL)
+   - Username (for SSH connections)
+   - Password (stored securely, for SSH connections only)
    - Local backup path (e.g., `D:\backup\myproject`)
    - Exclude patterns (comma-separated, glob format)
      - Use `**` for recursive: `**/node_modules/**` excludes at any depth
      - Single `*` for one level: `*.log` excludes log files in root only
+
+**Note**: WSL connections use direct file system access via Windows UNC paths (`\\wsl$\distro\path`) and don't require SSH credentials.
 
 ### Manage Sync Targets
 
@@ -206,8 +209,8 @@ Settings (File → Preferences → Settings → Remote Sync):
 ## Requirements
 
 - VSCode 1.80.0 or higher
-- Remote-SSH extension (for remote development)
-- SSH access to remote server
+- Remote-SSH extension (for SSH-based remote development) OR WSL extension (for WSL-based development)
+- SSH access to remote server (for Remote-SSH) OR WSL2 with a Linux distribution installed (for WSL)
 - Windows OS (for local backup)
 
 ## License

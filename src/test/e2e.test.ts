@@ -70,8 +70,25 @@ describe('End-to-End Tests', () => {
     it('should sync new files from remote to local', async function() {
       this.timeout(15000);
 
-      // Create files on remote
+      // Clear database snapshots to ensure clean state
+      dbManager.clearSnapshots('e2e-test');
+
+      // Clean up any existing files first
       const sftp = sshManager.getSFTP();
+      const existingFiles = await new Promise<string[]>((resolve, reject) => {
+        sftp.readdir(remoteTestDir, (err, list) => {
+          if (err) resolve([]);
+          else resolve(list.map(item => item.filename));
+        });
+      });
+
+      for (const file of existingFiles) {
+        await new Promise<void>((resolve) => {
+          sftp.unlink(`${remoteTestDir}/${file}`, () => resolve());
+        });
+      }
+
+      // Create files on remote
       const testFiles = ['file1.txt', 'file2.txt', 'file3.txt'];
 
       for (const file of testFiles) {
@@ -87,7 +104,7 @@ describe('End-to-End Tests', () => {
       let remoteFiles = await syncEngine.scanRemoteDirectory();
       let changes = syncEngine.detectChanges(remoteFiles);
 
-      assert.strictEqual(changes.length, testFiles.length);
+      assert.strictEqual(changes.length, testFiles.length, `Expected ${testFiles.length} changes, got ${changes.length}`);
       assert.ok(changes.every(c => c.type === 'added'));
 
       // Download files

@@ -88,6 +88,19 @@ export class DatabaseManager {
     this.save();
   }
 
+  public clearSnapshots(projectId: string): void {
+    const keysToDelete: string[] = [];
+    for (const [key, snapshot] of this.data.snapshots.entries()) {
+      if (snapshot.projectId === projectId) {
+        keysToDelete.push(key);
+      }
+    }
+    for (const key of keysToDelete) {
+      this.data.snapshots.delete(key);
+    }
+    this.save();
+  }
+
   public addSyncHistory(history: SyncHistory): number {
     // Use timestamp-based ID to avoid conflicts after deletions
     // Format: timestamp in milliseconds + random 3-digit number
