@@ -152,7 +152,10 @@
     "test:unit": "mocha --require ts-node/register src/test/FileSyncEngine.test.ts src/test/LocalBackupManager.test.ts --timeout 30000",
     "test:integration": "mocha --require ts-node/register src/test/integration.test.ts --timeout 60000",
     "test:e2e": "mocha --require ts-node/register src/test/e2e.test.ts --timeout 120000",
-    "test:perf": "mocha --require ts-node/register src/test/performance.test.ts --timeout 300000"
+    "test:perf": "mocha --require ts-node/register src/test/performance.test.ts --timeout 300000",
+    "test:wsl": "node test-wsl-standalone.js && npx ts-node test-wsl-core.ts",
+    "test:wsl-standalone": "node test-wsl-standalone.js",
+    "test:wsl-core": "npx ts-node test-wsl-core.ts"
   },
   "devDependencies": {
     "@types/chai": "^5.2.3",
