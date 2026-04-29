@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { minimatch } from 'minimatch';
 import { IFileAccessor, FileInfo, FileStats } from './IFileAccessor';
 
@@ -103,7 +104,15 @@ export class WSLFileAccessor implements IFileAccessor {
    * Check if WSL distribution is running
    */
   private isDistributionStopped(error: any): boolean {
-    return error.code === 'ENOENT' || error.code === 'ENOTDIR';
+    // Handle both Node.js fs errors and VSCode FileSystemError
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+      return true;
+    }
+    // VSCode FileSystemError codes
+    if (error.code === 'FileNotFound' || error.code === 'FileNotADirectory') {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -172,11 +181,12 @@ export class WSLFileAccessor implements IFileAccessor {
   ): Promise<void> {
     const fullLinuxPath = path.posix.join(basePath, relativePath);
     const windowsPath = this.toWindowsPath(fullLinuxPath);
+    const uri = vscode.Uri.file(windowsPath);
 
-    const entries = await fs.promises.readdir(windowsPath, { withFileTypes: true });
+    const entries = await vscode.workspace.fs.readDirectory(uri);
 
-    for (const entry of entries) {
-      const itemRelativePath = path.posix.join(relativePath, entry.name);
+    for (const [name, fileType] of entries) {
+      const itemRelativePath = path.posix.join(relativePath, name);
 
       // Check if excluded
       if (this.isExcluded(itemRelativePath)) {
@@ -192,24 +202,25 @@ export class WSLFileAccessor implements IFileAccessor {
         continue;
       }
 
-      if (entry.isDirectory()) {
+      if (fileType === vscode.FileType.Directory) {
         // Recursively scan subdirectory
         try {
           await this.scanRecursive(basePath, itemRelativePath, files);
         } catch (error) {
           console.error(`Failed to scan directory ${itemRelativePath}:`, error);
         }
-      } else if (entry.isFile()) {
+      } else if (fileType === vscode.FileType.File) {
         // Get file stats
         const itemWindowsPath = this.toWindowsPath(itemFullLinuxPath);
-        const stats = await fs.promises.stat(itemWindowsPath);
+        const itemUri = vscode.Uri.file(itemWindowsPath);
+        const stats = await vscode.workspace.fs.stat(itemUri);
 
         files.set(itemRelativePath, {
-          mtime: stats.mtimeMs,
+          mtime: stats.mtime,
           size: stats.size
         });
       }
-      // Symlinks are skipped (neither isDirectory nor isFile)
+      // Symlinks are skipped (FileType.SymbolicLink)
     }
   }
 
@@ -219,35 +230,49 @@ export class WSLFileAccessor implements IFileAccessor {
   public async downloadFile(remotePath: string, localPath: string): Promise<void> {
     const remoteFullPath = path.posix.join(this.remotePath, remotePath);
     const windowsPath = this.toWindowsPath(remoteFullPath);
+    const remoteUri = vscode.Uri.file(windowsPath);
     // Use extension-specific temp file suffix to avoid conflicts with user files
     const localTempPath = `${localPath}.remotesync.tmp`;
+    const localTempUri = vscode.Uri.file(localTempPath);
+    const localUri = vscode.Uri.file(localPath);
 
     try {
       // Ensure local directory exists
       const localDir = path.dirname(localPath);
-      if (!fs.existsSync(localDir)) {
-        fs.mkdirSync(localDir, { recursive: true });
+      const localDirUri = vscode.Uri.file(localDir);
+      try {
+        await vscode.workspace.fs.stat(localDirUri);
+      } catch {
+        // Directory doesn't exist, create it
+        await vscode.workspace.fs.createDirectory(localDirUri);
       }
 
       // Get remote file size before copying
-      const remoteStats = await fs.promises.stat(windowsPath);
+      const remoteStats = await vscode.workspace.fs.stat(remoteUri);
 
       // Copy to temp file
-      await fs.promises.copyFile(windowsPath, localTempPath);
+      await vscode.workspace.fs.copy(remoteUri, localTempUri, { overwrite: true });
 
       // Verify file size
-      const localStats = await fs.promises.stat(localTempPath);
+      const localStats = await vscode.workspace.fs.stat(localTempUri);
       if (localStats.size !== remoteStats.size) {
-        fs.unlinkSync(localTempPath);
+        await vscode.workspace.fs.delete(localTempUri);
         throw new Error(`File size mismatch: ${remotePath}`);
       }
 
-      // Rename to final name
-      fs.renameSync(localTempPath, localPath);
+      // Rename to final name (delete target if exists, then rename)
+      try {
+        await vscode.workspace.fs.delete(localUri);
+      } catch {
+        // Target doesn't exist, that's fine
+      }
+      await vscode.workspace.fs.rename(localTempUri, localUri);
     } catch (error: any) {
       // Clean up temp file on error
-      if (fs.existsSync(localTempPath)) {
-        fs.unlinkSync(localTempPath);
+      try {
+        await vscode.workspace.fs.delete(localTempUri);
+      } catch {
+        // Ignore cleanup errors
       }
 
       if (this.isDistributionStopped(error)) {
@@ -267,15 +292,16 @@ export class WSLFileAccessor implements IFileAccessor {
   public async getFileStats(filePath: string): Promise<FileStats> {
     const fullPath = path.posix.join(this.remotePath, filePath);
     const windowsPath = this.toWindowsPath(fullPath);
+    const uri = vscode.Uri.file(windowsPath);
 
     try {
-      const stats = await fs.promises.stat(windowsPath);
+      const stats = await vscode.workspace.fs.stat(uri);
 
       return {
-        mtime: stats.mtimeMs,
+        mtime: stats.mtime,
         size: stats.size,
-        isFile: stats.isFile(),
-        isDirectory: stats.isDirectory()
+        isFile: stats.type === vscode.FileType.File,
+        isDirectory: stats.type === vscode.FileType.Directory
       };
     } catch (error: any) {
       if (this.isDistributionStopped(error)) {
