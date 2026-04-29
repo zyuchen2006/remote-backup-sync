@@ -271,6 +271,14 @@ ${t('config.backupCount')}: ${config.backupCount}
       return;
     }
 
+    // Check WSL security settings
+    const { WSLSecurityHelper } = await import('../utils/WSLSecurityHelper');
+    const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
+    if (!hasAccess) {
+      vscode.window.showWarningMessage('WSL sync cancelled. Please configure security settings to continue.');
+      return;
+    }
+
     // Ask for local path
     const localPath = await vscode.window.showInputBox({
       prompt: 'Select local Windows directory for backup',
@@ -394,6 +402,14 @@ ${t('config.backupCount')}: ${config.backupCount}
             sshManager
           );
         } else if (envType === 'wsl') {
+          // Check WSL security settings before starting
+          const { WSLSecurityHelper } = await import('../utils/WSLSecurityHelper');
+          const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
+          if (!hasAccess) {
+            this.outputManager.error(`[${target.remotePath}] WSL sync cancelled: security settings not configured`);
+            continue; // Skip this target
+          }
+
           const distroName = target.distroName;
           if (!distroName) {
             throw new Error(`WSL distribution name not found for target ${target.projectId}`);
