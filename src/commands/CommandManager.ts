@@ -67,8 +67,10 @@ export class CommandManager {
   }
 
   public async autoStart(): Promise<void> {
+    console.log('[CommandManager] autoStart() called');
     const config = ConfigManager.loadConfig();
     if (!config) {
+      console.log('[CommandManager] No config found, skipping autoStart');
       return;
     }
 
@@ -84,13 +86,17 @@ export class CommandManager {
         }];
 
     const hasWSLTargets = targets.some(t => t.enabled && t.environmentType === 'wsl');
+    console.log('[CommandManager] Has WSL targets?', hasWSLTargets);
 
     if (hasWSLTargets) {
       // Check WSL security settings before auto-starting
+      console.log('[CommandManager] Checking WSL security settings...');
       const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
+      console.log('[CommandManager] WSL access granted?', hasAccess);
 
       if (!hasAccess) {
         // Don't auto-start if user declined WSL access
+        console.log('[CommandManager] WSL access denied, not auto-starting');
         this.notificationManager.showWarning(
           'WSL sync not started: security settings not configured. Please configure security settings and start manually.'
         );
@@ -99,6 +105,7 @@ export class CommandManager {
     }
 
     // Proceed with auto-start
+    console.log('[CommandManager] Proceeding with autoStart');
     this.start().catch(err => console.error('Auto-start failed:', err));
   }
 
