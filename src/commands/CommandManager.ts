@@ -17,6 +17,7 @@ import { SSHConfigReader } from '../utils/SSHConfigReader';
 import { FileAccessorFactory } from '../core/FileAccessorFactory';
 import { IFileAccessor } from '../core/IFileAccessor';
 import { WSLFileAccessor } from '../core/WSLFileAccessor';
+import { WSLSecurityHelper } from '../utils/WSLSecurityHelper';
 
 export class CommandManager {
   private context: vscode.ExtensionContext;
@@ -65,11 +66,40 @@ export class CommandManager {
     );
   }
 
-  public autoStart(): void {
+  public async autoStart(): Promise<void> {
     const config = ConfigManager.loadConfig();
-    if (config) {
-      this.start().catch(err => console.error('Auto-start failed:', err));
+    if (!config) {
+      return;
     }
+
+    // Check if there are any WSL targets
+    const targets: SyncTarget[] = config.syncTargets?.length
+      ? config.syncTargets
+      : [{
+          projectId: config.projectId,
+          remotePath: config.remotePath,
+          localPath: config.localPath,
+          enabled: true,
+          environmentType: 'ssh' // Default to SSH for backward compatibility
+        }];
+
+    const hasWSLTargets = targets.some(t => t.enabled && t.environmentType === 'wsl');
+
+    if (hasWSLTargets) {
+      // Check WSL security settings before auto-starting
+      const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
+
+      if (!hasAccess) {
+        // Don't auto-start if user declined WSL access
+        this.notificationManager.showWarning(
+          'WSL sync not started: security settings not configured. Please configure security settings and start manually.'
+        );
+        return;
+      }
+    }
+
+    // Proceed with auto-start
+    this.start().catch(err => console.error('Auto-start failed:', err));
   }
 
   /**
@@ -272,7 +302,6 @@ ${t('config.backupCount')}: ${config.backupCount}
     }
 
     // Check WSL security settings
-    const { WSLSecurityHelper } = await import('../utils/WSLSecurityHelper');
     const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
     if (!hasAccess) {
       vscode.window.showWarningMessage('WSL sync cancelled. Please configure security settings to continue.');
@@ -403,7 +432,6 @@ ${t('config.backupCount')}: ${config.backupCount}
           );
         } else if (envType === 'wsl') {
           // Check WSL security settings before starting
-          const { WSLSecurityHelper } = await import('../utils/WSLSecurityHelper');
           const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
           if (!hasAccess) {
             this.outputManager.error(`[${target.remotePath}] WSL sync cancelled: security settings not configured`);
