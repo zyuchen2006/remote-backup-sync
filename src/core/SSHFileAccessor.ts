@@ -117,7 +117,8 @@ export class SSHFileAccessor implements IFileAccessor {
   public async downloadFile(remotePath: string, localPath: string): Promise<void> {
     const sftp = this.sshManager.getSFTP();
     const remoteFullPath = path.posix.join(this.remotePath, remotePath);
-    const localTempPath = `${localPath}.tmp`;
+    // Use extension-specific temp file suffix to avoid conflicts with user files
+    const localTempPath = `${localPath}.remotesync.tmp`;
 
     // Ensure local directory exists
     const localDir = path.dirname(localPath);

@@ -1,3 +1,4 @@
+import './test-setup-with-mock';
 import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -209,11 +210,11 @@ describe('WSLFileAccessor Tests', () => {
   });
 
   describe('Temporary File Cleanup', () => {
-    it('should clean up orphaned .tmp files', function() {
+    it('should clean up orphaned .remotesync.tmp files', function() {
       this.timeout(5000);
-      // Create some .tmp files
-      const tmpFile1 = path.join(localTestDir, 'orphan1.txt.tmp');
-      const tmpFile2 = path.join(localTestDir, 'orphan2.txt.tmp');
+      // Create some .remotesync.tmp files (extension-specific temp files)
+      const tmpFile1 = path.join(localTestDir, 'orphan1.txt.remotesync.tmp');
+      const tmpFile2 = path.join(localTestDir, 'orphan2.txt.remotesync.tmp');
       fs.writeFileSync(tmpFile1, 'orphan');
       fs.writeFileSync(tmpFile2, 'orphan');
 

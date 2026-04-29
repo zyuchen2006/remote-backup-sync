@@ -23,6 +23,15 @@ export interface SyncTarget {
   localPath: string;
   enabled: boolean;
   excludePatterns?: string[];
+  // Environment type: 'ssh' or 'wsl'
+  environmentType?: 'ssh' | 'wsl';
+  // WSL-specific fields
+  distroName?: string;
+  // SSH-specific fields (for per-target SSH configs)
+  host?: string;
+  port?: number;
+  username?: string;
+  identityFile?: string;
 }
 
 export interface SyncConfig {

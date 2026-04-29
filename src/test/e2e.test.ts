@@ -101,8 +101,8 @@ describe('End-to-End Tests', () => {
       }
 
       // Scan and detect changes
-      let remoteFiles = await syncEngine.scanRemoteDirectory();
-      let changes = syncEngine.detectChanges(remoteFiles);
+      const remoteFiles = await syncEngine.scanRemoteDirectory();
+      const changes = syncEngine.detectChanges(remoteFiles);
 
       assert.strictEqual(changes.length, testFiles.length, `Expected ${testFiles.length} changes, got ${changes.length}`);
       assert.ok(changes.every(c => c.type === 'added'));
@@ -176,8 +176,8 @@ describe('End-to-End Tests', () => {
         });
       });
 
-      let remoteFiles = await syncEngine.scanRemoteDirectory();
-      let changes = syncEngine.detectChanges(remoteFiles);
+      const remoteFiles = await syncEngine.scanRemoteDirectory();
+      const changes = syncEngine.detectChanges(remoteFiles);
       const change = changes.find(c => c.path === testFile);
       if (change) {
         await syncEngine.downloadFile(change.path);

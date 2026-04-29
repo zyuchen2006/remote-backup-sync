@@ -51,8 +51,6 @@ export class SSHConnectionManager extends EventEmitter {
         await this.establishConnection();
         this.reconnectAttempts = 0;
         this.emit('connected');
-      } catch (error) {
-        throw error;
       } finally {
         this.isConnecting = false;
         this.connectingPromise = null;
@@ -138,6 +136,16 @@ export class SSHConnectionManager extends EventEmitter {
       throw new Error('SFTP session not established');
     }
     return this.sftp;
+  }
+
+  /**
+   * Get SSH client for executing commands
+   */
+  public getClient(): Client {
+    if (!this.client) {
+      throw new Error('SSH client not initialized');
+    }
+    return this.client;
   }
 
   /**

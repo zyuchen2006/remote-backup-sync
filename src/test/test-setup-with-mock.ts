@@ -1,7 +1,7 @@
 /**
  * Test setup for mocking vscode module
  */
-const Module = require('module');
+import Module = require('module');
 
 // Create vscode mock inline
 const vscodeMock = {
@@ -60,7 +60,7 @@ const vscodeMock = {
     }
 
     static parse(value: string) {
-      const match = value.match(/^(\w+):\/\/([^\/]*)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
+      const match = value.match(/^(\w+):\/\/([^/]*)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
       if (match) {
         return new Uri(
           match[1] || '',
@@ -82,9 +82,10 @@ const vscodeMock = {
 // Mock the vscode module
 const originalRequire = Module.prototype.require;
 
-Module.prototype.require = function (id: string) {
+Module.prototype.require = function (this: any, id: string) {
   if (id === 'vscode') {
     return vscodeMock;
   }
-  return originalRequire.apply(this, arguments as any);
+  // Use original require for other modules
+  return originalRequire.call(this, id);
 } as any;

@@ -1,3 +1,4 @@
+import './test-setup-with-mock';
 import * as assert from 'assert';
 import { RemoteEnvironmentDetector } from '../core/RemoteEnvironmentDetector';
 

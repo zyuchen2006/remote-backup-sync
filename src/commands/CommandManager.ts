@@ -25,7 +25,7 @@ export class CommandManager {
   private notificationManager: NotificationManager;
   private treeProvider: SyncTreeDataProvider;
   private schedulers: Map<string, SyncScheduler> = new Map();
-  private sshManager: SSHConnectionManager | null = null;
+  private sshManagers: Map<string, SSHConnectionManager> = new Map();
   // Keep single scheduler reference for backward compat
   private get scheduler(): SyncScheduler | null {
     return this.schedulers.values().next().value ?? null;
@@ -70,6 +70,39 @@ export class CommandManager {
     if (config) {
       this.start().catch(err => console.error('Auto-start failed:', err));
     }
+  }
+
+  /**
+   * Get SSH connection key for identifying unique connections
+   */
+  private getSSHConnectionKey(host: string, port: number, username: string): string {
+    return `${host}:${port}:${username}`;
+  }
+
+  /**
+   * Get or create SSH connection manager for the given credentials
+   */
+  private async getOrCreateSSHManager(
+    host: string,
+    port: number,
+    username: string,
+    privateKey?: Buffer,
+    password?: string
+  ): Promise<SSHConnectionManager> {
+    const key = this.getSSHConnectionKey(host, port, username);
+
+    let manager = this.sshManagers.get(key);
+    if (manager && manager.isConnected()) {
+      return manager; // Reuse existing connection
+    }
+
+    // Create new connection
+    manager = new SSHConnectionManager({ host, port, username, privateKey, password });
+    this.outputManager.info(t('info.connecting', username, host, port));
+    await manager.connect();
+    this.outputManager.info(t('info.connected'));
+    this.sshManagers.set(key, manager);
+    return manager;
   }
 
   /**
@@ -176,6 +209,7 @@ Debug Information:
       const projectId = `${host}_${remotePath.replace(/\//g, '_')}`;
       const config = ConfigManager.loadConfig() as any || ConfigManager.createDefaultConfig(projectId, remotePath, localPath) as any;
 
+      // Keep global SSH config for backward compatibility, but also store per-target
       config.host = host;
       config.port = port;
       config.username = username;
@@ -183,7 +217,18 @@ Debug Information:
 
       if (!config.syncTargets) { config.syncTargets = []; }
       const existingIdx = config.syncTargets.findIndex((t: SyncTarget) => t.projectId === projectId);
-      const newTarget: SyncTarget = { projectId, remotePath, localPath, enabled: true, excludePatterns };
+      const newTarget: SyncTarget = {
+        projectId,
+        remotePath,
+        localPath,
+        enabled: true,
+        excludePatterns,
+        environmentType: 'ssh',
+        host,
+        port,
+        username,
+        identityFile: sshConfig?.identityFile
+      };
       if (existingIdx >= 0) {
         config.syncTargets[existingIdx] = newTarget;
       } else {
@@ -252,13 +297,21 @@ ${t('config.backupCount')}: ${config.backupCount}
     const projectId = `wsl_${wslInfo.distroName}_${remotePath.replace(/\//g, '_')}`;
     const config = ConfigManager.loadConfig() as any || ConfigManager.createDefaultConfig(projectId, remotePath, localPath) as any;
 
-    // Store WSL-specific info
-    config.environmentType = 'wsl';
-    config.distroName = wslInfo.distroName;
+    // Remove global environment type storage (moved to per-target)
+    // config.environmentType = 'wsl';
+    // config.distroName = wslInfo.distroName;
 
     if (!config.syncTargets) { config.syncTargets = []; }
     const existingIdx = config.syncTargets.findIndex((t: SyncTarget) => t.projectId === projectId);
-    const newTarget: SyncTarget = { projectId, remotePath, localPath, enabled: true, excludePatterns };
+    const newTarget: SyncTarget = {
+      projectId,
+      remotePath,
+      localPath,
+      enabled: true,
+      excludePatterns,
+      environmentType: 'wsl',
+      distroName: wslInfo.distroName
+    };
     if (existingIdx >= 0) {
       config.syncTargets[existingIdx] = newTarget;
     } else {
@@ -293,53 +346,57 @@ ${t('config.backupCount')}: ${config.backupCount}
         return;
       }
 
-      const envType = config.environmentType || 'ssh';
-
-      // Setup SSH connection if needed
-      if (envType === 'ssh') {
-        const host: string = config.host;
-        const port: number = config.port || 22;
-        const username: string = config.username || 'root';
-        const privateKey = config.identityFile ?
-          fs.readFileSync(config.identityFile) : undefined;
-
-        let password: string | undefined;
-        if (!privateKey) {
-          const secretKey = `remoteSync.password.${host}:${username}`;
-          password = await this.context.secrets.get(secretKey);
-          if (!password) {
-            password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
-            if (!password) { return; }
-            await this.context.secrets.store(secretKey, password);
-          }
-        }
-
-        if (!this.sshManager || !this.sshManager.isConnected()) {
-          this.sshManager = new SSHConnectionManager({ host, port, username, privateKey, password });
-          this.outputManager.info(t('info.connecting', username, host, port));
-          await this.sshManager.connect();
-          this.outputManager.info(t('info.connected'));
-        }
-      }
-
+      // Get targets
       const targets: SyncTarget[] = config.syncTargets?.length
         ? config.syncTargets
-        : [{ projectId: config.projectId, remotePath: config.remotePath, localPath: config.localPath, enabled: true }];
+        : [{ projectId: config.projectId, remotePath: config.remotePath, localPath: config.localPath, enabled: true, environmentType: config.environmentType || 'ssh' }];
 
       this.treeProvider.setTargets(targets);
 
       for (const target of targets) {
         if (!target.enabled || this.schedulers.get(target.projectId)?.isActive()) { continue; }
 
+        // Determine environment type from target (not global config)
+        const envType = target.environmentType || 'ssh';
+
         const dbPath = ConfigManager.getDatabasePath(target.projectId);
         const dbManager = new DatabaseManager(dbPath);
 
-        // Create appropriate file accessor
+        // Create appropriate file accessor based on target's environment type
         let accessor: IFileAccessor;
-        if (envType === 'wsl') {
-          const distroName = config.distroName;
+
+        if (envType === 'ssh') {
+          const host: string = target.host || config.host;
+          const port: number = target.port || config.port || 22;
+          const username: string = target.username || config.username || 'root';
+          const identityFile = target.identityFile || config.identityFile;
+          const privateKey = identityFile ? fs.readFileSync(identityFile) : undefined;
+
+          let password: string | undefined;
+          if (!privateKey) {
+            const secretKey = `remoteSync.password.${host}:${username}`;
+            password = await this.context.secrets.get(secretKey);
+            if (!password) {
+              password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
+              if (!password) { continue; } // Skip this target if no password
+              await this.context.secrets.store(secretKey, password);
+            }
+          }
+
+          // Get or create SSH manager for this specific host/port/username combination
+          const sshManager = await this.getOrCreateSSHManager(host, port, username, privateKey, password);
+
+          // Create accessor with the correct SSH connection
+          const { SSHFileAccessor } = await import('../core/SSHFileAccessor');
+          accessor = new SSHFileAccessor(
+            target.remotePath,
+            target.excludePatterns || config.excludePatterns,
+            sshManager
+          );
+        } else if (envType === 'wsl') {
+          const distroName = target.distroName;
           if (!distroName) {
-            throw new Error('WSL distribution name not found in config');
+            throw new Error(`WSL distribution name not found for target ${target.projectId}`);
           }
           accessor = new WSLFileAccessor(
             distroName,
@@ -349,15 +406,7 @@ ${t('config.backupCount')}: ${config.backupCount}
           // Clean up temp files on startup
           (accessor as WSLFileAccessor).cleanupTempFiles(target.localPath);
         } else {
-          if (!this.sshManager) {
-            throw new Error('SSH connection manager not initialized');
-          }
-          const { SSHFileAccessor } = require('../core/SSHFileAccessor');
-          accessor = new SSHFileAccessor(
-            target.remotePath,
-            target.excludePatterns || config.excludePatterns,
-            this.sshManager
-          );
+          throw new Error(`Unknown environment type: ${envType}`);
         }
 
         const syncEngine = new FileSyncEngine(
@@ -401,9 +450,12 @@ ${t('config.backupCount')}: ${config.backupCount}
     }
     this.schedulers.clear();
 
-    // Disconnect SSH
-    this.sshManager?.disconnect();
-    this.sshManager = null;
+    // Disconnect all SSH connections
+    for (const manager of this.sshManagers.values()) {
+      manager.disconnect();
+    }
+    this.sshManagers.clear();
+
     this.statusBar.showIdle();
     this.notificationManager.showInfo(t('info.syncStopped'));
   }
@@ -512,43 +564,47 @@ ${t('config.backupCount')}: ${config.backupCount}
     const target = config.syncTargets?.find((t: SyncTarget) => t.projectId === projectId);
     if (!target) { return; }
 
-    const envType = config.environmentType || 'ssh';
-
-    // Ensure SSH connection if needed
-    if (envType === 'ssh') {
-      if (!this.sshManager || !this.sshManager.isConnected()) {
-        const host: string = config.host;
-        const port: number = config.port || 22;
-        const username: string = config.username || 'root';
-        const privateKey = config.identityFile ? fs.readFileSync(config.identityFile) : undefined;
-
-        let password: string | undefined;
-        if (!privateKey) {
-          const secretKey = `remoteSync.password.${host}:${username}`;
-          password = await this.context.secrets.get(secretKey);
-          if (!password) {
-            password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
-            if (!password) { return; }
-            await this.context.secrets.store(secretKey, password);
-          }
-        }
-
-        this.sshManager = new SSHConnectionManager({ host, port, username, privateKey, password });
-        this.outputManager.info(t('info.connecting', username, host, port));
-        await this.sshManager.connect();
-        this.outputManager.info(t('info.connected'));
-      }
-    }
+    // Read environment type from target, not global config
+    const envType = target.environmentType || 'ssh';
 
     const dbPath = ConfigManager.getDatabasePath(target.projectId);
     const dbManager = new DatabaseManager(dbPath);
 
-    // Create appropriate file accessor
+    // Create appropriate file accessor based on target's environment type
     let accessor: IFileAccessor;
-    if (envType === 'wsl') {
-      const distroName = config.distroName;
+
+    if (envType === 'ssh') {
+      const host: string = target.host || config.host;
+      const port: number = target.port || config.port || 22;
+      const username: string = target.username || config.username || 'root';
+      const identityFile = target.identityFile || config.identityFile;
+      const privateKey = identityFile ? fs.readFileSync(identityFile) : undefined;
+
+      let password: string | undefined;
+      if (!privateKey) {
+        const secretKey = `remoteSync.password.${host}:${username}`;
+        password = await this.context.secrets.get(secretKey);
+        if (!password) {
+          password = await vscode.window.showInputBox({ prompt: t('dialog.sshPassword'), password: true });
+          if (!password) { return; }
+          await this.context.secrets.store(secretKey, password);
+        }
+      }
+
+      // Get or create SSH manager for this specific host/port/username combination
+      const sshManager = await this.getOrCreateSSHManager(host, port, username, privateKey, password);
+
+      // Create accessor with the correct SSH connection
+      const { SSHFileAccessor } = await import('../core/SSHFileAccessor');
+      accessor = new SSHFileAccessor(
+        target.remotePath,
+        target.excludePatterns || config.excludePatterns,
+        sshManager
+      );
+    } else if (envType === 'wsl') {
+      const distroName = target.distroName;
       if (!distroName) {
-        throw new Error('WSL distribution name not found in config');
+        throw new Error(`WSL distribution name not found for target ${target.projectId}`);
       }
       accessor = new WSLFileAccessor(
         distroName,
@@ -557,15 +613,7 @@ ${t('config.backupCount')}: ${config.backupCount}
       );
       (accessor as WSLFileAccessor).cleanupTempFiles(target.localPath);
     } else {
-      if (!this.sshManager) {
-        throw new Error('SSH connection manager not initialized');
-      }
-      const { SSHFileAccessor } = require('../core/SSHFileAccessor');
-      accessor = new SSHFileAccessor(
-        target.remotePath,
-        target.excludePatterns || config.excludePatterns,
-        this.sshManager
-      );
+      throw new Error(`Unknown environment type: ${envType}`);
     }
 
     const syncEngine = new FileSyncEngine(
@@ -597,10 +645,12 @@ ${t('config.backupCount')}: ${config.backupCount}
       this.schedulers.delete(projectId);
       this.treeProvider.updateStatus(projectId, 'stopped');
 
-      // If no more active schedulers, disconnect SSH
+      // If no more active schedulers, disconnect all SSH connections
       if (this.schedulers.size === 0) {
-        this.sshManager?.disconnect();
-        this.sshManager = null;
+        for (const manager of this.sshManagers.values()) {
+          manager.disconnect();
+        }
+        this.sshManagers.clear();
       }
     }
   }
@@ -619,10 +669,12 @@ ${t('config.backupCount')}: ${config.backupCount}
     this.schedulers.delete(projectId);
     this.treeProvider.removeTarget(projectId);
 
-    // If no more schedulers, disconnect SSH
+    // If no more schedulers, disconnect all SSH connections
     if (this.schedulers.size === 0) {
-      this.sshManager?.disconnect();
-      this.sshManager = null;
+      for (const manager of this.sshManagers.values()) {
+        manager.disconnect();
+      }
+      this.sshManagers.clear();
     }
 
     const config = ConfigManager.loadConfig() as any;

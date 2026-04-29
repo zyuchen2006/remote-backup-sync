@@ -61,7 +61,7 @@ export class Uri {
 
   static parse(value: string): Uri {
     // Simple parse implementation
-    const match = value.match(/^(\w+):\/\/([^\/]*)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
+    const match = value.match(/^(\w+):\/\/([^/]*)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
     if (match) {
       return new Uri(
         match[1] || '',

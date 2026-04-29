@@ -103,11 +103,11 @@ export class SyncScheduler extends EventEmitter {
       this.updateProgress({ status: SyncStatus.Scanning, filesProcessed: 0, totalFiles: 0, bytesTransferred: 0 });
       this.log('Scanning remote directory...');
 
-      const remoteFiles = await this.syncEngine.scanRemoteDirectory();
-      this.log(`Scan complete: ${remoteFiles.size} files found`);
+      const scanResult = await this.syncEngine.scanRemoteDirectoryWithConflicts();
+      this.log(`Scan complete: ${scanResult.files.size} files found`);
 
-      const changes = this.syncEngine.detectChanges(remoteFiles);
-      this.log(`Changes detected: ${changes.length} (added/modified/deleted)`);
+      const changes = this.syncEngine.detectChangesWithConflicts(scanResult);
+      this.log(`Changes detected: ${changes.length} (added/modified/deleted/skipped)`);
 
       if (changes.length === 0) {
         this.updateProgress({ status: SyncStatus.Idle, filesProcessed: 0, totalFiles: 0, bytesTransferred: 0 });
@@ -119,10 +119,22 @@ export class SyncScheduler extends EventEmitter {
 
       let filesAdded = 0, filesModified = 0, filesDeleted = 0, bytesTransferred = 0;
       let filesFailed = 0;
+      let filesSkipped = 0;
       const failedFiles: string[] = [];
+      const skippedFiles: Array<{ path: string; reason: string }> = [];
 
       for (const change of changes) {
         try {
+          // Handle skipped files (conflicts)
+          if (change.type === 'skipped') {
+            filesSkipped++;
+            skippedFiles.push({ path: change.path, reason: change.reason || 'Unknown reason' });
+            this.log(`Skipped ${change.path}: ${change.reason}`);
+            this.currentProgress.filesProcessed++;
+            this.emit('progress', { ...this.currentProgress });
+            continue;
+          }
+
           this.log(`Processing ${change.type}: ${change.path}`);
           await this.processChange(change);
           this.currentProgress.filesProcessed++;
@@ -143,16 +155,25 @@ export class SyncScheduler extends EventEmitter {
       const history: SyncHistory = {
         projectId: this.projectId, syncTime: Date.now(),
         filesAdded, filesModified, filesDeleted, bytesTransferred,
-        status: filesFailed > 0 ? 'partial_success' : 'success',
+        status: (filesFailed > 0 || filesSkipped > 0) ? 'partial_success' : 'success',
         duration: Date.now() - startTime
       };
       this.dbManager.addSyncHistory(history);
 
       this.updateProgress({ status: SyncStatus.Idle, filesProcessed: 0, totalFiles: 0, bytesTransferred: 0 });
 
+      if (filesSkipped > 0) {
+        this.log(`Skipped ${filesSkipped} file(s) due to conflicts:`);
+        for (const { path, reason } of skippedFiles) {
+          this.log(`  - ${path}: ${reason}`);
+        }
+      }
+
       if (filesFailed > 0) {
-        this.log(`Sync completed with errors: +${filesAdded} ~${filesModified} -${filesDeleted}, ${filesFailed} failed`);
+        this.log(`Sync completed with errors: +${filesAdded} ~${filesModified} -${filesDeleted}, ${filesFailed} failed, ${filesSkipped} skipped`);
         this.log(`Failed files: ${failedFiles.join(', ')}`);
+      } else if (filesSkipped > 0) {
+        this.log(`Sync complete with skipped files: +${filesAdded} ~${filesModified} -${filesDeleted}, ${filesSkipped} skipped`);
       } else {
         this.log(`Sync complete: +${filesAdded} ~${filesModified} -${filesDeleted}`);
       }

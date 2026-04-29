@@ -1,14 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { IFileAccessor } from './IFileAccessor';
+import { IFileAccessor, ScanResult } from './IFileAccessor';
 import { DatabaseManager } from './DatabaseManager';
 import { FileSnapshot } from '../types';
 
 export interface FileChange {
-  type: 'added' | 'modified' | 'deleted';
+  type: 'added' | 'modified' | 'deleted' | 'skipped';
   path: string;
   remoteMtime?: number;
   size?: number;
+  reason?: string; // For skipped files
 }
 
 export class FileSyncEngine {
@@ -37,6 +38,40 @@ export class FileSyncEngine {
    */
   public async scanRemoteDirectory(): Promise<Map<string, { mtime: number; size: number }>> {
     return await this.accessor.scanDirectory(this.remotePath);
+  }
+
+  /**
+   * Scan remote directory with conflict detection (for WSL)
+   */
+  public async scanRemoteDirectoryWithConflicts(): Promise<ScanResult> {
+    if (this.accessor.scanDirectoryWithConflicts) {
+      return await this.accessor.scanDirectoryWithConflicts(this.remotePath);
+    }
+    // Fallback for non-WSL accessors
+    const files = await this.accessor.scanDirectory(this.remotePath);
+    return { files };
+  }
+
+  /**
+   * Detect changes by comparing with snapshots, including conflicts
+   */
+  public detectChangesWithConflicts(scanResult: ScanResult): FileChange[] {
+    const changes = this.detectChanges(scanResult.files);
+
+    // Add skipped files for conflicts
+    if (scanResult.conflicts) {
+      for (const conflict of scanResult.conflicts) {
+        for (const filePath of conflict.files) {
+          changes.push({
+            type: 'skipped',
+            path: filePath,
+            reason: conflict.reason
+          });
+        }
+      }
+    }
+
+    return changes;
   }
 
   /**

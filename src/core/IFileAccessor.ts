@@ -17,6 +17,17 @@ export interface FileStats {
 }
 
 /**
+ * Scan result with optional conflict information
+ */
+export interface ScanResult {
+  files: Map<string, FileInfo>;
+  conflicts?: Array<{
+    files: string[];
+    reason: string;
+  }>;
+}
+
+/**
  * Abstract interface for file access operations
  * Supports both SSH (via SFTP) and WSL (via direct file system access)
  */
@@ -27,6 +38,13 @@ export interface IFileAccessor {
    * @returns Map of relative file paths to file info
    */
   scanDirectory(path: string): Promise<Map<string, FileInfo>>;
+
+  /**
+   * Scan directory with conflict detection (optional, for WSL)
+   * @param path - Remote path to scan
+   * @returns Scan result with files and conflicts
+   */
+  scanDirectoryWithConflicts?(path: string): Promise<ScanResult>;
 
   /**
    * Download file from remote to local

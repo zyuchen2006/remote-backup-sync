@@ -34,55 +34,69 @@ export class WSLFileAccessor implements IFileAccessor {
 
   /**
    * Validate path for Windows compatibility
+   * Returns error message if invalid, null if valid
    */
-  private validatePath(linuxPath: string): void {
+  private validatePath(linuxPath: string): string | null {
     // Check Windows reserved characters
     if (/[<>:"|?*]/.test(linuxPath)) {
-      throw new Error(
-        `Path contains Windows-incompatible characters: ${linuxPath}\n` +
-        `Please rename the file in WSL to remove: < > : " | ? *`
-      );
+      return `Path contains Windows-incompatible characters: ${linuxPath}. Please rename the file in WSL to remove: < > : " | ? *`;
     }
 
     // Check Windows reserved names
     const fileName = path.basename(linuxPath);
     if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(fileName)) {
-      throw new Error(
-        `File name is reserved by Windows: ${fileName}\n` +
-        `Please rename the file in WSL.`
-      );
+      return `File name is reserved by Windows: ${fileName}. Please rename the file in WSL.`;
     }
 
     // Check path length (conservative limit: 250 chars)
     const windowsPath = this.toWindowsPath(linuxPath);
     if (windowsPath.length > 250) {
-      throw new Error(
-        `Path too long for Windows (${windowsPath.length} chars): ${linuxPath}\n` +
-        `Windows has a 260-character limit.`
-      );
+      return `Path too long for Windows (${windowsPath.length} chars): ${linuxPath}. Windows has a 260-character limit.`;
     }
+
+    return null;
   }
 
   /**
-   * Detect case-sensitivity conflicts
+   * Detect case-sensitivity conflicts and remove conflicting files
+   * Returns array of conflicts for reporting
    */
-  private detectCaseConflicts(files: Map<string, FileInfo>): void {
-    const caseMap = new Map<string, string>();
+  private detectCaseConflicts(files: Map<string, FileInfo>): Array<{ files: string[]; reason: string }> {
+    const caseMap = new Map<string, string[]>();
+    const conflicts: Array<{ files: string[]; reason: string }> = [];
 
+    // Group files by lowercase path
     for (const [filePath] of files.entries()) {
       const lowerPath = filePath.toLowerCase();
+      if (!caseMap.has(lowerPath)) {
+        caseMap.set(lowerPath, []);
+      }
+      caseMap.get(lowerPath)!.push(filePath);
+    }
 
-      if (caseMap.has(lowerPath)) {
-        throw new Error(
-          `Case-sensitive filename conflict detected:\n` +
-          `  - ${caseMap.get(lowerPath)}\n` +
-          `  - ${filePath}\n` +
-          `These files are different in WSL but would be the same on Windows.`
+    // Find conflicts and remove all conflicting files
+    for (const [lowerPath, filePaths] of caseMap.entries()) {
+      if (filePaths.length > 1) {
+        // Multiple files with same lowercase path = conflict
+        conflicts.push({
+          files: filePaths,
+          reason: 'Case-insensitive conflict on Windows'
+        });
+
+        // Remove all conflicting files from scan result
+        for (const filePath of filePaths) {
+          files.delete(filePath);
+        }
+
+        // Log error for each conflict
+        console.error(
+          `[WSL Sync] Case conflict detected: ${filePaths.join(' vs ')}\n` +
+          `Windows cannot distinguish these files. All conflicting files excluded from sync.`
         );
       }
-
-      caseMap.set(lowerPath, filePath);
     }
+
+    return conflicts;
   }
 
   /**
@@ -111,6 +125,14 @@ export class WSLFileAccessor implements IFileAccessor {
    * Scan directory and return all files with metadata
    */
   public async scanDirectory(basePath: string): Promise<Map<string, FileInfo>> {
+    const result = await this.scanDirectoryWithConflicts(basePath);
+    return result.files;
+  }
+
+  /**
+   * Scan directory with conflict detection
+   */
+  public async scanDirectoryWithConflicts(basePath: string): Promise<import('./IFileAccessor').ScanResult> {
     const files = new Map<string, FileInfo>();
 
     try {
@@ -125,10 +147,19 @@ export class WSLFileAccessor implements IFileAccessor {
       throw error;
     }
 
-    // Detect case-sensitivity conflicts before returning
-    this.detectCaseConflicts(files);
+    // Detect case-sensitivity conflicts and remove conflicting files
+    const conflicts = this.detectCaseConflicts(files);
 
-    return files;
+    if (conflicts.length > 0) {
+      const totalConflictedFiles = conflicts.reduce((sum, c) => sum + c.files.length, 0);
+      console.warn(
+        `[WSL Sync] Detected ${conflicts.length} case-sensitivity conflict(s) affecting ${totalConflictedFiles} file(s).\n` +
+        `Conflicting files have been excluded from sync to prevent data corruption on Windows.\n` +
+        `Please rename these files in WSL to avoid conflicts.`
+      );
+    }
+
+    return { files, conflicts };
   }
 
   /**
@@ -154,7 +185,12 @@ export class WSLFileAccessor implements IFileAccessor {
 
       // Validate path for Windows compatibility
       const itemFullLinuxPath = path.posix.join(basePath, itemRelativePath);
-      this.validatePath(itemFullLinuxPath);
+      const validationError = this.validatePath(itemFullLinuxPath);
+      if (validationError) {
+        // Log warning and skip this file instead of failing entire scan
+        console.warn(`[WSL Sync] Skipping incompatible file: ${validationError}`);
+        continue;
+      }
 
       if (entry.isDirectory()) {
         // Recursively scan subdirectory
@@ -183,7 +219,8 @@ export class WSLFileAccessor implements IFileAccessor {
   public async downloadFile(remotePath: string, localPath: string): Promise<void> {
     const remoteFullPath = path.posix.join(this.remotePath, remotePath);
     const windowsPath = this.toWindowsPath(remoteFullPath);
-    const localTempPath = `${localPath}.tmp`;
+    // Use extension-specific temp file suffix to avoid conflicts with user files
+    const localTempPath = `${localPath}.remotesync.tmp`;
 
     try {
       // Ensure local directory exists
@@ -271,7 +308,7 @@ export class WSLFileAccessor implements IFileAccessor {
   }
 
   /**
-   * Find all .tmp files recursively
+   * Find all .remotesync.tmp files recursively (only extension-created temp files)
    */
   private findTempFilesRecursive(dir: string): string[] {
     const tempFiles: string[] = [];
@@ -287,7 +324,8 @@ export class WSLFileAccessor implements IFileAccessor {
 
       if (entry.isDirectory()) {
         tempFiles.push(...this.findTempFilesRecursive(fullPath));
-      } else if (entry.isFile() && entry.name.endsWith('.tmp')) {
+      } else if (entry.isFile() && entry.name.endsWith('.remotesync.tmp')) {
+        // Only find extension-specific temp files, not user's .tmp files
         tempFiles.push(fullPath);
       }
     }

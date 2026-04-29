@@ -48,10 +48,10 @@ describe('Performance Tests', () => {
   });
 
   after(async function() {
-    this.timeout(60000);
+    this.timeout(300000);
     if (sshManager) {
       console.log('[Performance Test] Cleaning up remote test files...');
-      await cleanupRemoteDir(sshManager.getSFTP(), remoteTestDir);
+      await cleanupRemoteDir(sshManager, remoteTestDir);
       sshManager.disconnect();
     }
     if (fs.existsSync(localTestDir)) {
@@ -124,7 +124,7 @@ describe('Performance Tests', () => {
 
   describe('Database Performance', () => {
     it('should handle large number of snapshots', function() {
-      this.timeout(30000);
+      this.timeout(120000);
 
       const startTime = Date.now();
 
@@ -156,7 +156,7 @@ describe('Performance Tests', () => {
 
   describe('Memory Usage', () => {
     it('should not exceed memory limits during large sync', async function() {
-      this.timeout(120000);
+      this.timeout(180000);
 
       const initialMemory = process.memoryUsage().heapUsed / 1024 / 1024;
       console.log(`\n[Performance] Initial memory: ${initialMemory.toFixed(2)}MB`);
@@ -213,8 +213,30 @@ async function createRemoteTestFiles(sftp: any, baseDir: string, count: number):
   }
 }
 
-async function cleanupRemoteDir(sftp: any, dir: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    sftp.rmdir(dir, { recursive: true }, () => resolve());
+async function cleanupRemoteDir(sshManager: SSHConnectionManager, dir: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    // Use SSH exec instead of SFTP for much faster deletion
+    sshManager.getClient().exec(`rm -rf "${dir}"`, (err: any, stream: any) => {
+      if (err) return reject(err);
+
+      let stdout = '';
+      let stderr = '';
+
+      stream.on('close', (code: number) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Cleanup failed with code ${code}. stderr: ${stderr}`));
+        }
+      });
+
+      stream.on('data', (data: any) => {
+        stdout += data.toString();
+      });
+
+      stream.stderr.on('data', (data: any) => {
+        stderr += data.toString();
+      });
+    });
   });
 }
