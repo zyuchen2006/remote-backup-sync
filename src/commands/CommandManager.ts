@@ -19,6 +19,13 @@ import { IFileAccessor } from '../core/IFileAccessor';
 import { WSLFileAccessor } from '../core/WSLFileAccessor';
 import { WSLSecurityHelper } from '../utils/WSLSecurityHelper';
 
+/**
+ * NOTE: WSL support is currently DISABLED for users due to VSCode security restrictions.
+ * The WSL-related code (WSLFileAccessor, WSLSecurityHelper, configureWSL, etc.) is preserved
+ * for potential future use, but users cannot configure or use WSL sync targets.
+ * Only SSH-based sync is supported in production.
+ */
+
 export class CommandManager {
   private context: vscode.ExtensionContext;
   private statusBar: StatusBarManager;
@@ -74,7 +81,7 @@ export class CommandManager {
       return;
     }
 
-    // Check if there are any WSL targets
+    // Check if there are any WSL targets (WSL support is disabled)
     const targets: SyncTarget[] = config.syncTargets?.length
       ? config.syncTargets
       : [{
@@ -89,22 +96,15 @@ export class CommandManager {
     console.log('[CommandManager] Has WSL targets?', hasWSLTargets);
 
     if (hasWSLTargets) {
-      // Check WSL security settings before auto-starting
-      console.log('[CommandManager] Checking WSL security settings...');
-      const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
-      console.log('[CommandManager] WSL access granted?', hasAccess);
-
-      if (!hasAccess) {
-        // Don't auto-start if user declined WSL access
-        console.log('[CommandManager] WSL access denied, not auto-starting');
-        this.notificationManager.showWarning(
-          'WSL sync not started: security settings not configured. Please configure security settings and start manually.'
-        );
-        return;
-      }
+      // WSL support is disabled - warn user and skip auto-start for WSL targets
+      console.log('[CommandManager] WSL targets detected but WSL support is disabled');
+      this.notificationManager.showWarning(
+        'WSL sync targets are not supported. Only SSH targets will be started. Please reconfigure using Remote-SSH.'
+      );
+      // Continue with auto-start for SSH targets only (handled in start() method)
     }
 
-    // Proceed with auto-start
+    // Proceed with auto-start (start() method will skip WSL targets)
     console.log('[CommandManager] Proceeding with autoStart');
     this.start().catch(err => console.error('Auto-start failed:', err));
   }
@@ -187,9 +187,19 @@ Debug Information:
         return;
       }
 
-      // Handle WSL configuration
+      // WSL support is currently disabled - only SSH is supported
       if (envType === 'wsl') {
-        await this.configureWSL(remotePath);
+        vscode.window.showErrorMessage(
+          'WSL sync is currently not supported. Please use Remote-SSH instead.',
+          'Learn More'
+        ).then(choice => {
+          if (choice === 'Learn More') {
+            vscode.window.showInformationMessage(
+              'This extension currently only supports SSH-based remote sync. ' +
+              'Please connect to your remote server using the Remote-SSH extension.'
+            );
+          }
+        });
         return;
       }
 
@@ -300,6 +310,11 @@ ${t('config.backupCount')}: ${config.backupCount}
 
   /**
    * Configure WSL sync
+   *
+   * NOTE: This method is currently DISABLED and not called in production.
+   * WSL support has been disabled due to VSCode security restrictions with UNC paths.
+   * This code is preserved for potential future use if the security issues can be resolved.
+   * Users attempting to configure WSL sync will be redirected to use SSH instead.
    */
   private async configureWSL(remotePath: string): Promise<void> {
     const wslInfo = RemoteEnvironmentDetector.getWSLInfo();
@@ -438,24 +453,12 @@ ${t('config.backupCount')}: ${config.backupCount}
             sshManager
           );
         } else if (envType === 'wsl') {
-          // Check WSL security settings before starting
-          const hasAccess = await WSLSecurityHelper.ensureWSLAccess();
-          if (!hasAccess) {
-            this.outputManager.error(`[${target.remotePath}] WSL sync cancelled: security settings not configured`);
-            continue; // Skip this target
-          }
-
-          const distroName = target.distroName;
-          if (!distroName) {
-            throw new Error(`WSL distribution name not found for target ${target.projectId}`);
-          }
-          accessor = new WSLFileAccessor(
-            distroName,
-            target.remotePath,
-            target.excludePatterns || config.excludePatterns
+          // WSL support is disabled - skip this target
+          this.outputManager.error(`[${target.remotePath}] WSL sync is not supported. Please reconfigure using Remote-SSH.`);
+          this.notificationManager.showWarning(
+            `WSL target "${target.remotePath}" skipped. Only SSH targets are supported.`
           );
-          // Clean up temp files on startup
-          (accessor as WSLFileAccessor).cleanupTempFiles(target.localPath);
+          continue; // Skip this target
         } else {
           throw new Error(`Unknown environment type: ${envType}`);
         }
