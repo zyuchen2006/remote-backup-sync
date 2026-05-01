@@ -11,6 +11,7 @@ import { ConfigManager } from '../core/ConfigManager';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { OutputChannelManager, NotificationManager } from '../ui/OutputChannelManager';
 import { SyncTreeDataProvider } from '../ui/SyncTreeDataProvider';
+import { ConfigurationWebViewProvider } from '../ui/webview/ConfigurationWebViewProvider';
 import { SyncTarget } from '../types';
 import { t } from '../utils/i18n';
 import { SSHConfigReader } from '../utils/SSHConfigReader';
@@ -59,6 +60,7 @@ export class CommandManager {
   public registerCommands(): void {
     this.context.subscriptions.push(
       vscode.commands.registerCommand('remoteSync.configure', this.configure.bind(this)),
+      vscode.commands.registerCommand('remoteSync.editConfiguration', this.editConfiguration.bind(this)),
       vscode.commands.registerCommand('remoteSync.start', this.start.bind(this)),
       vscode.commands.registerCommand('remoteSync.stop', this.stop.bind(this)),
       vscode.commands.registerCommand('remoteSync.pause', this.pause.bind(this)),
@@ -81,7 +83,7 @@ export class CommandManager {
       return;
     }
 
-    // Check if there are any WSL targets (WSL support is disabled)
+    // Get targets
     const targets: SyncTarget[] = config.syncTargets?.length
       ? config.syncTargets
       : [{
@@ -89,10 +91,20 @@ export class CommandManager {
           remotePath: config.remotePath,
           localPath: config.localPath,
           enabled: true,
-          environmentType: 'ssh' // Default to SSH for backward compatibility
+          environmentType: 'ssh', // Default to SSH for backward compatibility
+          autoStart: true // Default to true for backward compatibility
         }];
 
-    const hasWSLTargets = targets.some(t => t.enabled && t.environmentType === 'wsl');
+    // Filter targets that should auto-start
+    const autoStartTargets = targets.filter(t => t.enabled && (t.autoStart !== false));
+
+    if (autoStartTargets.length === 0) {
+      console.log('[CommandManager] No targets configured for auto-start');
+      return;
+    }
+
+    // Check if there are any WSL targets (WSL support is disabled)
+    const hasWSLTargets = autoStartTargets.some(t => t.environmentType === 'wsl');
     console.log('[CommandManager] Has WSL targets?', hasWSLTargets);
 
     if (hasWSLTargets) {
@@ -101,12 +113,11 @@ export class CommandManager {
       this.notificationManager.showWarning(
         'WSL sync targets are not supported. Only SSH targets will be started. Please reconfigure using Remote-SSH.'
       );
-      // Continue with auto-start for SSH targets only (handled in start() method)
     }
 
-    // Proceed with auto-start (start() method will skip WSL targets)
-    console.log('[CommandManager] Proceeding with autoStart');
-    this.start().catch(err => console.error('Auto-start failed:', err));
+    // Start only targets with autoStart enabled
+    console.log('[CommandManager] Auto-starting targets:', autoStartTargets.map(t => t.projectId));
+    await this.startTargets(autoStartTargets);
   }
 
   /**
@@ -168,7 +179,7 @@ Debug Information:
   }
 
   /**
-   * Configure sync
+   * Configure sync - opens WebView configuration UI
    */
   private async configure(uri: vscode.Uri): Promise<void> {
     try {
@@ -203,103 +214,46 @@ Debug Information:
         return;
       }
 
-      // Handle SSH configuration (existing logic)
-
-      // Auto-detect host/port from SSH_CONNECTION env var, fallback to manual input
-      const autoConn = RemoteEnvironmentDetector.getSSHConnectionInfo();
-
-      const sshHost = await vscode.window.showInputBox({
-        prompt: t('dialog.sshHost'),
-        placeHolder: 'my-server or 192.168.1.100',
-        value: autoConn?.host || ''
-      });
-      if (!sshHost) {
-        return;
+      // Check for duplicate remote path with different local path
+      const config = ConfigManager.loadConfig();
+      if (config?.syncTargets) {
+        const existingTarget = config.syncTargets.find(t => t.remotePath === remotePath);
+        if (existingTarget) {
+          // Remote path already configured - open edit mode instead
+          const choice = await vscode.window.showInformationMessage(
+            `Remote path ${remotePath} is already configured. Do you want to edit the existing configuration?`,
+            'Edit', 'Cancel'
+          );
+          if (choice === 'Edit') {
+            ConfigurationWebViewProvider.createOrShow(this.context, existingTarget.projectId);
+          }
+          return;
+        }
       }
 
-      const sshConfig = SSHConfigReader.findMatchingConfig(sshHost);
-      const host = sshConfig?.hostname || sshHost;
-      const port = autoConn?.port || sshConfig?.port || 22;
-
-      const usernameInput = await vscode.window.showInputBox({
-        prompt: t('dialog.sshUsername'),
-        value: sshConfig?.user || process.env.USER || 'root'
-      });
-      if (!usernameInput) {
-        return;
-      }
-      const username = usernameInput;
-
-      // Ask for local path
-      const localPath = await vscode.window.showInputBox({
-        prompt: t('dialog.selectLocalPath'),
-        placeHolder: 'D:\\projects\\myapp',
-        value: `D:\\projects\\${path.basename(remotePath)}`
-      });
-      if (!localPath) {
-        return;
-      }
-
-      const validation = ConfigManager.validateLocalPath(localPath);
-      if (!validation.valid) {
-        vscode.window.showErrorMessage(t('error.invalidLocalPath', validation.error || ''));
-        return;
-      }
-
-      const excludeInput = await vscode.window.showInputBox({
-        prompt: t('dialog.excludePatterns'),
-        placeHolder: 'node_modules/**,.git/**',
-        value: ConfigManager.getExcludePatterns().join(',')
-      });
-      const excludePatterns = excludeInput ? excludeInput.split(',').map(s => s.trim()).filter(Boolean) : ConfigManager.getExcludePatterns();
-
-      const projectId = `${host}_${remotePath.replace(/\//g, '_')}`;
-      const config = ConfigManager.loadConfig() as any || ConfigManager.createDefaultConfig(projectId, remotePath, localPath) as any;
-
-      // Keep global SSH config for backward compatibility, but also store per-target
-      config.host = host;
-      config.port = port;
-      config.username = username;
-      config.identityFile = sshConfig?.identityFile;
-
-      if (!config.syncTargets) { config.syncTargets = []; }
-      const existingIdx = config.syncTargets.findIndex((t: SyncTarget) => t.projectId === projectId);
-      const newTarget: SyncTarget = {
-        projectId,
-        remotePath,
-        localPath,
-        enabled: true,
-        excludePatterns,
-        environmentType: 'ssh',
-        host,
-        port,
-        username,
-        identityFile: sshConfig?.identityFile
-      };
-      if (existingIdx >= 0) {
-        config.syncTargets[existingIdx] = newTarget;
-      } else {
-        config.syncTargets.push(newTarget);
-      }
-
-      ConfigManager.saveConfig(config);
-
-      this.treeProvider.addTarget(newTarget);
-
-      const summary = `
-${t('config.remotePath')}: ${username}@${host}:${port}${remotePath}
-${t('config.localPath')}: ${localPath}
-${t('config.syncInterval')}: ${config.syncInterval}s
-${t('config.backupCount')}: ${config.backupCount}
-      `.trim();
-
-      const result = await vscode.window.showInformationMessage(
-        summary, { modal: true }, t('command.start'), t('dialog.cancel')
+      // Open WebView configuration UI in create mode
+      ConfigurationWebViewProvider.createOrShow(this.context, undefined, remotePath);
+    } catch (error) {
+      this.notificationManager.showErrorWithActions(
+        t('error.syncFailed', (error as Error).message),
+        error as Error
       );
+    }
+  }
 
-      if (result === t('command.start')) {
-        await this.start();
+  /**
+   * Edit configuration for a specific target
+   */
+  private async editConfiguration(item: any): Promise<void> {
+    try {
+      const projectId = item?.targetState?.target?.projectId;
+      if (!projectId) {
+        vscode.window.showErrorMessage('No target selected');
+        return;
       }
+
+      // Open WebView configuration UI in edit mode
+      ConfigurationWebViewProvider.createOrShow(this.context, projectId);
     } catch (error) {
       this.notificationManager.showErrorWithActions(
         t('error.syncFailed', (error as Error).message),
@@ -397,18 +351,16 @@ ${t('config.backupCount')}: ${config.backupCount}
     }
   }
 
-  private async start(): Promise<void> {
+  /**
+   * Start specific targets
+   */
+  private async startTargets(targets: SyncTarget[]): Promise<void> {
     try {
       const config = ConfigManager.loadConfig() as any;
       if (!config) {
         vscode.window.showErrorMessage('No sync configuration found. Please configure first.');
         return;
       }
-
-      // Get targets
-      const targets: SyncTarget[] = config.syncTargets?.length
-        ? config.syncTargets
-        : [{ projectId: config.projectId, remotePath: config.remotePath, localPath: config.localPath, enabled: true, environmentType: config.environmentType || 'ssh' }];
 
       this.treeProvider.setTargets(targets);
 
@@ -486,6 +438,21 @@ ${t('config.backupCount')}: ${config.backupCount}
         t('error.connectionFailed', (error as Error).message), error as Error
       );
     }
+  }
+
+  private async start(): Promise<void> {
+    const config = ConfigManager.loadConfig() as any;
+    if (!config) {
+      vscode.window.showErrorMessage('No sync configuration found. Please configure first.');
+      return;
+    }
+
+    // Get targets
+    const targets: SyncTarget[] = config.syncTargets?.length
+      ? config.syncTargets
+      : [{ projectId: config.projectId, remotePath: config.remotePath, localPath: config.localPath, enabled: true, environmentType: config.environmentType || 'ssh' }];
+
+    await this.startTargets(targets);
   }
 
   /**

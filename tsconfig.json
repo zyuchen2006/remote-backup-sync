@@ -12,7 +12,7 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "exclude": ["node_modules", ".vscode-test", "test-*.ts", "test-*.js"],
+  "exclude": ["node_modules", ".vscode-test", "test-*.ts", "test-*.js", "src/ui/webview/**"],
   "ts-node": {
     "compilerOptions": {
       "module": "commonjs"

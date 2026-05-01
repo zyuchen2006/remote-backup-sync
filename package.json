@@ -59,6 +59,11 @@
         "title": "%remoteSync.configure%"
       },
       {
+        "command": "remoteSync.editConfiguration",
+        "title": "Edit Configuration",
+        "icon": "$(edit)"
+      },
+      {
         "command": "remoteSync.start",
         "title": "%remoteSync.start%"
       },
@@ -102,6 +107,11 @@
           "command": "remoteSync.removeTarget",
           "when": "view == remoteSyncTargets && viewItem == syncTarget",
           "group": "inline@3"
+        },
+        {
+          "command": "remoteSync.editConfiguration",
+          "when": "view == remoteSyncTargets && viewItem == syncTarget",
+          "group": "navigation@1"
         }
       ],
       "explorer/context": [

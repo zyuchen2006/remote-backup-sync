@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+    <title>Configure Remote Sync</title>
+    <style>
+        :root {
+            --container-padding: 20px;
+            --input-height: 26px;
+            --section-spacing: 24px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-editor-background);
+            padding: var(--container-padding);
+            margin: 0;
+        }
+
+        .form-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 0 0 24px 0;
+            color: var(--vscode-foreground);
+        }
+
+        .form-section {
+            margin-bottom: var(--section-spacing);
+            padding: 16px;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 0 12px 0;
+            color: var(--vscode-foreground);
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+        }
+
+        .form-row .form-group.small {
+            flex: 0 0 120px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 13px;
+            color: var(--vscode-foreground);
+        }
+
+        label .required {
+            color: var(--vscode-errorForeground);
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="password"],
+        textarea {
+            width: 100%;
+            height: var(--input-height);
+            padding: 4px 8px;
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-input-foreground);
+            background-color: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="password"]:focus,
+        textarea:focus {
+            border-color: var(--vscode-focusBorder);
+        }
+
+        input[type="text"]:disabled,
+        input[type="number"]:disabled,
+        input[type="password"]:disabled,
+        textarea:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        textarea {
+            height: 60px;
+            resize: vertical;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .input-with-button {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-with-button input {
+            flex: 1;
+        }
+
+        button {
+            padding: 4px 12px;
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-button-foreground);
+            background-color: var(--vscode-button-background);
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+            outline: none;
+            white-space: nowrap;
+        }
+
+        button:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            color: var(--vscode-button-secondaryForeground);
+            background-color: var(--vscode-button-secondaryBackground);
+        }
+
+        button.secondary:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+
+        .hint {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            margin-top: 4px;
+        }
+
+        .error {
+            font-size: 12px;
+            color: var(--vscode-errorForeground);
+            margin-top: 4px;
+            display: none;
+        }
+
+        .error.visible {
+            display: block;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .advanced-section {
+            margin-top: 16px;
+        }
+
+        .advanced-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 8px 0;
+            color: var(--vscode-textLink-foreground);
+            font-size: 13px;
+        }
+
+        .advanced-toggle:hover {
+            color: var(--vscode-textLink-activeForeground);
+        }
+
+        .advanced-toggle .icon {
+            transition: transform 0.2s;
+        }
+
+        .advanced-toggle.expanded .icon {
+            transform: rotate(90deg);
+        }
+
+        .advanced-content {
+            display: none;
+            margin-top: 12px;
+        }
+
+        .advanced-content.visible {
+            display: block;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--vscode-panel-border);
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--vscode-button-foreground);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .test-result {
+            margin-top: 8px;
+            padding: 8px 12px;
+            border-radius: 2px;
+            font-size: 12px;
+            display: none;
+        }
+
+        .test-result.visible {
+            display: block;
+        }
+
+        .test-result.success {
+            background-color: var(--vscode-testing-iconPassed);
+            color: var(--vscode-editor-background);
+        }
+
+        .test-result.error {
+            background-color: var(--vscode-inputValidation-errorBackground);
+            color: var(--vscode-inputValidation-errorForeground);
+            border: 1px solid var(--vscode-inputValidation-errorBorder);
+        }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <h1 id="form-title">Configure Remote Sync</h1>
+
+        <form id="config-form">
+            <!-- SSH Connection Section -->
+            <div class="form-section">
+                <h2 class="section-title" data-i18n="section.sshConnection">SSH Connection</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="host"><span data-i18n="field.host">Host</span> <span class="required">*</span></label>
+                        <input type="text" id="host" name="host" placeholder="my-server.com" required>
+                        <div class="error" id="host-error"></div>
+                    </div>
+                    <div class="form-group small">
+                        <label for="port"><span data-i18n="field.port">Port</span> <span class="required">*</span></label>
+                        <input type="number" id="port" name="port" value="22" min="1" max="65535" required>
+                        <div class="error" id="port-error"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="username"><span data-i18n="field.username">Username</span> <span class="required">*</span></label>
+                    <input type="text" id="username" name="username" required>
+                    <div class="error" id="username-error"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="password"><span data-i18n="field.password">Password</span></label>
+                    <input type="password" id="password" name="password" placeholder="Leave empty to use SSH key">
+                    <div class="hint" data-i18n="hint.password">Optional. Leave empty to use SSH key authentication.</div>
+                    <div class="error" id="password-error"></div>
+                </div>
+
+                <div class="form-group">
+                    <button type="button" id="test-connection" class="secondary">
+                        <span data-i18n="button.testConnection">Test Connection</span>
+                    </button>
+                    <div class="test-result" id="test-result"></div>
+                </div>
+            </div>
+
+            <!-- Paths Section -->
+            <div class="form-section">
+                <h2 class="section-title" data-i18n="section.paths">Paths</h2>
+
+                <div class="form-group">
+                    <label for="remotePath"><span data-i18n="field.remotePath">Remote Path</span> <span class="required">*</span></label>
+                    <input type="text" id="remotePath" name="remotePath" placeholder="/home/user/project" required>
+                    <div class="error" id="remotePath-error"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="localPath"><span data-i18n="field.localPath">Local Path</span> <span class="required">*</span></label>
+                    <div class="input-with-button">
+                        <input type="text" id="localPath" name="localPath" placeholder="D:\projects\myapp" required>
+                        <button type="button" id="browse" class="secondary" data-i18n="button.browse">Browse...</button>
+                    </div>
+                    <div class="hint" data-i18n="hint.localPath">Windows absolute path where files will be synced</div>
+                    <div class="error" id="localPath-error"></div>
+                </div>
+            </div>
+
+            <!-- Sync Settings Section -->
+            <div class="form-section">
+                <h2 class="section-title" data-i18n="section.syncSettings">Sync Settings</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="syncInterval"><span data-i18n="field.syncInterval">Sync Interval (seconds)</span> <span class="required">*</span></label>
+                        <input type="number" id="syncInterval" name="syncInterval" value="60" min="10" max="3600" required>
+                        <div class="hint" data-i18n="hint.syncInterval">Recommended: 60s (Range: 10-3600)</div>
+                        <div class="error" id="syncInterval-error"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="backupCount"><span data-i18n="field.backupCount">Backup Count</span> <span class="required">*</span></label>
+                        <input type="number" id="backupCount" name="backupCount" value="3" min="1" max="10" required>
+                        <div class="hint" data-i18n="hint.backupCount">Number of backup versions to keep (Range: 1-10)</div>
+                        <div class="error" id="backupCount-error"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Exclude Patterns Section -->
+            <div class="form-section">
+                <h2 class="section-title" data-i18n="section.excludePatterns">Exclude Patterns</h2>
+
+                <div class="form-group">
+                    <label for="excludePatterns"><span data-i18n="field.excludePatterns">Patterns (comma-separated)</span></label>
+                    <textarea id="excludePatterns" name="excludePatterns" placeholder="node_modules/**, .git/**, *.log"></textarea>
+                    <div class="hint" data-i18n="hint.excludePatterns">Use glob patterns. Example: node_modules/**, .git/**, *.log</div>
+                    <div class="error" id="excludePatterns-error"></div>
+                </div>
+            </div>
+
+            <!-- Advanced Settings Section -->
+            <div class="form-section">
+                <div class="advanced-toggle" id="advanced-toggle">
+                    <span class="icon">▶</span>
+                    <span data-i18n="section.advancedSettings">Advanced Settings</span>
+                </div>
+                <div class="advanced-content" id="advanced-content">
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="autoStart" name="autoStart" checked>
+                            <label for="autoStart" data-i18n="field.autoStart">Auto-start sync on VSCode launch</label>
+                        </div>
+                        <div class="hint" data-i18n="hint.autoStart">Automatically start syncing when VSCode opens</div>
+                    </div>
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="startAfterSave" name="startAfterSave" checked>
+                            <label for="startAfterSave" data-i18n="field.startAfterSave">Start sync after saving</label>
+                        </div>
+                        <div class="hint" data-i18n="hint.startAfterSave">Automatically start syncing after saving configuration</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Actions -->
+            <div class="form-actions">
+                <button type="button" id="cancel" class="secondary" data-i18n="button.cancel">Cancel</button>
+                <button type="submit" id="save" data-i18n="button.save">Save</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        // Script will be injected here by webpack bundle
+    </script>
+</body>
+</html>

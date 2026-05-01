@@ -1,0 +1,14 @@
+.vscode/**
+.opencode/**
+.claude/**
+.codex/**
+openspec/**
+out/**
+src/**
+node_modules/**
+.gitignore
+*.txt
+tsconfig.json
+webpack.config.js
+
+!src/ui/webview/configForm.html

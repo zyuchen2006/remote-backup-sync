@@ -32,6 +32,8 @@ export interface SyncTarget {
   port?: number;
   username?: string;
   identityFile?: string;
+  // Auto-start on VSCode launch
+  autoStart?: boolean;
 }
 
 export interface SyncConfig {
